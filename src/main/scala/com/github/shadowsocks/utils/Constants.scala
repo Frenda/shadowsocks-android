@@ -55,10 +55,6 @@ object Msg {
   val VPN_ERROR = 6
 }
 
-object Path {
-  val BASE = "/data/data/com.github.shadowsocks/"
-}
-
 object Key {
   val profileId = "profileId"
   val profileName = "profileName"
@@ -114,4 +110,5 @@ object Route {
   val ALL = "all"
   val BYPASS_LAN = "bypass-lan"
   val BYPASS_CHN = "bypass-china"
+  val BYPASS_LAN_CHN = "bypass-lan-china"
 }

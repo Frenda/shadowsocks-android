@@ -106,8 +106,6 @@ class Shadowsocks
   var state = State.STOPPED
   var currentProfile = new Profile
   var vpnEnabled = -1
-  var trafficCache: String = _
-  var connectionTestResult: String = _
 
   // Services
   var currentServiceName = classOf[ShadowsocksNatService].getName
@@ -117,7 +115,7 @@ class Shadowsocks
         s match {
           case State.CONNECTING =>
             fab.setBackgroundTintList(greyTint)
-            fab.setImageResource(R.drawable.ic_cloud_queue)
+            fab.setImageResource(R.drawable.ic_start_busy)
             fab.setEnabled(false)
             fabProgressCircle.show()
             preferences.setEnabled(false)
@@ -142,11 +140,12 @@ class Shadowsocks
               if (m == getString(R.string.nat_no_root)) snackbar.setAction(R.string.switch_to_vpn,
                 (_ => preferences.natSwitch.setChecked(false)): View.OnClickListener)
               snackbar.show
+              Log.e(Shadowsocks.TAG, "Error to start VPN service: " + m)
             }
             preferences.setEnabled(true)
           case State.STOPPING =>
             fab.setBackgroundTintList(greyTint)
-            fab.setImageResource(R.drawable.ic_cloud_queue)
+            fab.setImageResource(R.drawable.ic_start_busy)
             fab.setEnabled(false)
             if (state == State.CONNECTED) fabProgressCircle.show()  // ignore for stopped
             preferences.setEnabled(false)
@@ -155,21 +154,13 @@ class Shadowsocks
       })
     }
     def trafficUpdated(txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long) {
-      trafficCache = getString(R.string.stat_summary).formatLocal(Locale.ENGLISH,
-        TrafficMonitor.formatTraffic(txRate), TrafficMonitor.formatTraffic(rxRate),
-        TrafficMonitor.formatTraffic(txTotal), TrafficMonitor.formatTraffic(rxTotal))
-      handler.post(updateTraffic)
+      handler.post(() => updateTraffic(txRate, rxRate, txTotal, rxTotal))
     }
   }
 
-  def updateTraffic(): Unit = if (trafficCache == null) callback.trafficUpdated(0, 0, 0, 0) else {
-    if (connectionTestResult == null) connectionTestResult = getString(R.string.connection_test_pending)
-    if (preferences.natSwitch.isChecked) {
-      preferences.stat.setSummary(trafficCache)
-    } else {
-      preferences.stat.setSummary(connectionTestResult + "\n" + trafficCache)
-    }
-  }
+  def updateTraffic(txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long) = preferences.stat
+    .setRate(TrafficMonitor.formatTraffic(txTotal), TrafficMonitor.formatTraffic(rxTotal),
+      TrafficMonitor.formatTraffic(txRate) + "/s", TrafficMonitor.formatTraffic(rxRate) + "/s")
 
   def attachService: Unit = attachService(callback)
 
@@ -177,6 +168,11 @@ class Shadowsocks
     // Update the UI
     if (fab != null) fab.setEnabled(true)
     updateState()
+    if (Build.VERSION.SDK_INT >= 21 && !ShadowsocksApplication.isVpnEnabled) {
+      val snackbar = Snackbar.make(findViewById(android.R.id.content), R.string.nat_deprecated, Snackbar.LENGTH_LONG)
+      snackbar.setAction(R.string.switch_to_vpn, (_ => preferences.natSwitch.setChecked(false)): View.OnClickListener)
+      snackbar.show
+    }
 
     if (!ShadowsocksApplication.settings.getBoolean(ShadowsocksApplication.getVersionName, false)) {
       ShadowsocksApplication.settings.edit.putBoolean(ShadowsocksApplication.getVersionName, true).apply()
@@ -216,7 +212,7 @@ class Shadowsocks
 
   private def changeSwitch(checked: Boolean) {
     serviceStarted = checked
-    fab.setImageResource(if (checked) R.drawable.ic_cloud else R.drawable.ic_cloud_off)
+    fab.setImageResource(if (checked) R.drawable.ic_start_connected else R.drawable.ic_start_idle)
     if (fab.isEnabled) {
       fab.setEnabled(false)
       handler.postDelayed(() => fab.setEnabled(true), 1000)
@@ -253,7 +249,7 @@ class Shadowsocks
           } else {
             in = assetManager.open(file)
           }
-          out = new FileOutputStream(Path.BASE + file)
+          out = new FileOutputStream(getApplicationInfo.dataDir + "/" + file)
           copyFile(in, out)
           in.close()
           in = null
@@ -283,8 +279,8 @@ class Shadowsocks
     val cmd = new ArrayBuffer[String]()
 
     for (task <- Array("ss-local", "ss-tunnel", "pdnsd", "redsocks", "tun2socks")) {
-      cmd.append("chmod 666 %s%s-nat.pid".formatLocal(Locale.ENGLISH, Path.BASE, task))
-      cmd.append("chmod 666 %s%s-vpn.pid".formatLocal(Locale.ENGLISH, Path.BASE, task))
+      cmd.append("chmod 666 %s/%s-nat.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
+      cmd.append("chmod 666 %s/%s-vpn.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
     }
 
     if (ShadowsocksApplication.isVpnEnabled) {
@@ -297,19 +293,19 @@ class Shadowsocks
 
     for (task <- Array("ss-local", "ss-tunnel", "pdnsd", "redsocks", "tun2socks")) {
       try {
-        val pid_nat = scala.io.Source.fromFile(Path.BASE + task + "-nat.pid").mkString.trim.toInt
-        val pid_vpn = scala.io.Source.fromFile(Path.BASE + task + "-vpn.pid").mkString.trim.toInt
+        val pid_nat = scala.io.Source.fromFile(getApplicationInfo.dataDir + "/" + task + "-nat.pid").mkString.trim.toInt
+        val pid_vpn = scala.io.Source.fromFile(getApplicationInfo.dataDir + "/" + task + "-vpn.pid").mkString.trim.toInt
         cmd.append("kill -9 %d".formatLocal(Locale.ENGLISH, pid_nat))
         cmd.append("kill -9 %d".formatLocal(Locale.ENGLISH, pid_vpn))
         Process.killProcess(pid_nat)
         Process.killProcess(pid_vpn)
       } catch {
-        case e: Throwable => Log.e(Shadowsocks.TAG, "unable to kill " + task)
+        case e: Throwable => // Ignore
       }
-      cmd.append("rm -f %s%s-nat.pid".formatLocal(Locale.ENGLISH, Path.BASE, task))
-      cmd.append("rm -f %s%s-nat.conf".formatLocal(Locale.ENGLISH, Path.BASE, task))
-      cmd.append("rm -f %s%s-vpn.pid".formatLocal(Locale.ENGLISH, Path.BASE, task))
-      cmd.append("rm -f %s%s-vpn.conf".formatLocal(Locale.ENGLISH, Path.BASE, task))
+      cmd.append("rm -f %s/%s-nat.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
+      cmd.append("rm -f %s/%s-nat.conf".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
+      cmd.append("rm -f %s/%s-vpn.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
+      cmd.append("rm -f %s/%s-vpn.conf".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
     }
     if (ShadowsocksApplication.isVpnEnabled) Console.runCommand(cmd.toArray) else {
       Console.runRootCommand(cmd.toArray)
@@ -379,6 +375,7 @@ class Shadowsocks
         Toast.LENGTH_SHORT), fab, getWindow, 0, Utils.dpToPx(this, 8)).show
       true
     })
+    updateTraffic(0, 0, 0, 0)
 
     // Bind to the service
     handler.post(() => attachService)
@@ -418,25 +415,25 @@ class Shadowsocks
         case State.CONNECTING =>
           fab.setBackgroundTintList(greyTint)
           serviceStarted = false
-          fab.setImageResource(R.drawable.ic_cloud_queue)
+          fab.setImageResource(R.drawable.ic_start_busy)
           preferences.setEnabled(false)
           fabProgressCircle.show()
         case State.CONNECTED =>
           fab.setBackgroundTintList(greenTint)
           serviceStarted = true
-          fab.setImageResource(R.drawable.ic_cloud)
+          fab.setImageResource(R.drawable.ic_start_connected)
           preferences.setEnabled(false)
           fabProgressCircle.postDelayed(hideCircle, 100)
         case State.STOPPING =>
           fab.setBackgroundTintList(greyTint)
           serviceStarted = false
-          fab.setImageResource(R.drawable.ic_cloud_queue)
+          fab.setImageResource(R.drawable.ic_start_busy)
           preferences.setEnabled(false)
           fabProgressCircle.show()
         case _ =>
           fab.setBackgroundTintList(greyTint)
           serviceStarted = false
-          fab.setImageResource(R.drawable.ic_cloud_off)
+          fab.setImageResource(R.drawable.ic_start_idle)
           preferences.setEnabled(true)
           fabProgressCircle.postDelayed(hideCircle, 100)
       }
@@ -451,7 +448,6 @@ class Shadowsocks
     // Check if current profile changed
     if (ShadowsocksApplication.profileId != currentProfile.id) reloadProfile()
 
-    updateTraffic()
     updateState()
   }
 
@@ -493,7 +489,7 @@ class Shadowsocks
 
     val ab = new ArrayBuffer[String]
     for (executable <- Shadowsocks.EXECUTABLES) {
-      ab.append("chmod 755 " + Path.BASE + executable)
+      ab.append("chmod 755 " + getApplicationInfo.dataDir + "/" + executable)
     }
     Console.runCommand(ab.toArray)
   }

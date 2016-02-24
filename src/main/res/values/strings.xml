@@ -19,11 +19,12 @@
     <item quantity="one">Byte</item>
     <item quantity="other">Bytes</item>
   </plurals>
-  <string name="connection_test_pending">Tap to check Internet connection availability.</string>
+  <string name="connection_test_pending">Check Connectivity</string>
   <string name="connection_test_testing">Testing…</string>
-  <string name="connection_test_available">Internet connection available. (latency: %dms)</string>
-  <string name="connection_test_error">Fail: %s</string>
-  <string name="connection_test_error_status_code">Invalid status code. (#%d)</string>
+  <string name="connection_test_available">Success: %dms latency</string>
+  <string name="connection_test_error">Fail to detect internet connection: %s</string>
+  <string name="connection_test_fail">Internet Unavailable</string>
+  <string name="connection_test_error_status_code">Error code: #%d</string>
 
   <!-- proxy category -->
   <string name="proxy_cat">Server Settings</string>
@@ -53,7 +54,7 @@
   </string>
   <string name="route_list">Route</string>
   <string name="proxied_apps">Per-App Proxy</string>
-  <string name="proxied_apps_summary">Set proxy for selected apps</string>
+  <string name="proxied_apps_summary">Set proxy for selected apps, requires NAT mode under Android 4.x</string>
   <string name="on">On</string>
   <string name="bypass_apps">Bypass Mode</string>
   <string name="bypass_apps_summary">Enable this option to bypass selected apps</string>
@@ -65,6 +66,7 @@
   <!-- notification category -->
   <string name="forward_success">Shadowsocks started.</string>
   <string name="service_failed">Failed to connect the remote server</string>
+  <string name="nat_deprecated">WARNING: NAT mode has been deprecated since Android 5.0</string>
   <string name="nat_no_root">NAT mode requires ROOT permission</string>
   <string name="switch_to_vpn">Switch to VPN mode</string>
   <string name="stop">Stop the service</string>
@@ -110,7 +112,10 @@
   <string name="add_profile_dialog">Add this Shadowsocks Profile?</string>
   <string name="add_profile_methods_scan_qr_code">Scan QR code</string>
   <string name="add_profile_methods_manual_settings">Manual Settings</string>
-  <string name="removed">Removed</string>
+  <plurals name="removed">
+    <item quantity="one">Removed</item>
+    <item quantity="other">%d items removed</item>
+  </plurals>
   <string name="undo">Undo</string>
 
   <!-- tasker -->
@@ -119,4 +124,8 @@
   <string name="start_service">Connect to %s</string>
   <string name="stop_service">Switch to %s</string>
   <string name="profile_default">Use the current profile</string>
+
+  <!-- status -->
+  <string name="sent">Sent:</string>
+  <string name="received">Received:</string>
 </resources>
