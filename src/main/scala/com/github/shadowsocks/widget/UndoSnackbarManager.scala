@@ -1,3 +1,23 @@
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks.widget
 
 import android.support.design.widget.Snackbar
@@ -17,12 +37,12 @@ class UndoSnackbarManager[T](view: View, undo: Iterator[(Int, T)] => Unit,
                              commit: Iterator[(Int, T)] => Unit = null) {
   private val recycleBin = new ArrayBuffer[(Int, T)]
   private val removedCallback = new Snackbar.Callback {
-    override def onDismissed(snackbar: Snackbar, event: Int) = {
+    override def onDismissed(snackbar: Snackbar, event: Int) {
       event match {
         case Snackbar.Callback.DISMISS_EVENT_SWIPE | Snackbar.Callback.DISMISS_EVENT_MANUAL |
              Snackbar.Callback.DISMISS_EVENT_TIMEOUT =>
           if (commit != null) commit(recycleBin.iterator)
-          recycleBin.clear
+          recycleBin.clear()
         case _ =>
       }
       last = null
@@ -30,7 +50,7 @@ class UndoSnackbarManager[T](view: View, undo: Iterator[(Int, T)] => Unit,
   }
   private var last: Snackbar = _
 
-  def remove(index: Int, item: T) = {
+  def remove(index: Int, item: T) {
     recycleBin.append((index, item))
     val count = recycleBin.length
     last = Snackbar
@@ -39,8 +59,8 @@ class UndoSnackbarManager[T](view: View, undo: Iterator[(Int, T)] => Unit,
       undo(recycleBin.reverseIterator)
       recycleBin.clear
     }): View.OnClickListener)
-    last.show
+    last.show()
   }
 
-  def flush = if (last != null) last.dismiss
+  def flush(): Unit = if (last != null) last.dismiss()
 }

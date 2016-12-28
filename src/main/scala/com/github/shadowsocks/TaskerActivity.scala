@@ -1,41 +1,23 @@
-/*
- * Shadowsocks - A shadowsocks client for Android
- * Copyright (C) 2014 <max.c.lv@gmail.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- *
- *                            ___====-_  _-====___
- *                      _--^^^#####//      \\#####^^^--_
- *                   _-^##########// (    ) \\##########^-_
- *                  -############//  |\^^/|  \\############-
- *                _/############//   (@::@)   \\############\_
- *               /#############((     \\//     ))#############\
- *              -###############\\    (oo)    //###############-
- *             -#################\\  / VV \  //#################-
- *            -###################\\/      \//###################-
- *           _#/|##########/\######(   /\   )######/\##########|\#_
- *           |/ |#/\#/\#/\/  \#/\##\  |  |  /##/\#/  \/\#/\#/\#| \|
- *           `  |/  V  V  `   V  \#\| |  | |/#/  V   '  V  V  \|  '
- *              `   `  `      `   / | |  | | \   '      '  '   '
- *                               (  | |  | |  )
- *                              __\ | |  | | /__
- *                             (vvv(VVV)(VVV)vvv)
- *
- *                              HERE BE DRAGONS
- *
- */
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks
 
 import android.app.Activity
@@ -57,13 +39,13 @@ class TaskerActivity extends AppCompatActivity {
     {
       val typedArray = obtainStyledAttributes(Array(android.R.attr.selectableItemBackground))
       view.setBackgroundResource(typedArray.getResourceId(0, 0))
-      typedArray.recycle
+      typedArray.recycle()
     }
     private var item: Profile = _
     private val text = itemView.findViewById(android.R.id.text1).asInstanceOf[CheckedTextView]
     itemView.setOnClickListener(this)
 
-    def bindDefault {
+    def bindDefault() {
       item = null
       text.setText(R.string.profile_default)
       text.setChecked(taskerOption.profileId < 0)
@@ -78,15 +60,15 @@ class TaskerActivity extends AppCompatActivity {
       taskerOption.switchOn = switch.isChecked
       taskerOption.profileId = if (item == null) -1 else item.id
       setResult(Activity.RESULT_OK, taskerOption.toIntent(TaskerActivity.this))
-      finish
+      finish()
     }
   }
 
   private class ProfilesAdapter extends RecyclerView.Adapter[ProfileViewHolder] {
-    val profiles = app.profileManager.getAllProfiles.getOrElse(List.empty[Profile])
-    def getItemCount = 1 + profiles.length
-    def onBindViewHolder(vh: ProfileViewHolder, i: Int) = i match {
-      case 0 => vh.bindDefault
+    val profiles: List[Profile] = app.profileManager.getAllProfiles.getOrElse(List.empty[Profile])
+    def getItemCount: Int = 1 + profiles.length
+    def onBindViewHolder(vh: ProfileViewHolder, i: Int): Unit = i match {
+      case 0 => vh.bindDefault()
       case _ => vh.bind(profiles(i - 1))
     }
     private val name = "select_dialog_singlechoice_" + (if (Build.VERSION.SDK_INT >= 21) "material" else "holo")

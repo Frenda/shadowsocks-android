@@ -1,37 +1,60 @@
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks
 
 import java.nio.charset.Charset
 
+import android.app.TaskStackBuilder
 import android.content._
+import android.content.pm.PackageManager
 import android.nfc.NfcAdapter.CreateNdefMessageCallback
 import android.nfc.{NdefMessage, NdefRecord, NfcAdapter, NfcEvent}
-import android.os.{Bundle, Handler}
+import android.os.{Build, Bundle, Handler, UserManager}
 import android.provider.Settings
 import android.support.v7.app.{AlertDialog, AppCompatActivity}
 import android.support.v7.widget.RecyclerView.ViewHolder
 import android.support.v7.widget.Toolbar.OnMenuItemClickListener
+import android.support.v7.widget._
 import android.support.v7.widget.helper.ItemTouchHelper
 import android.support.v7.widget.helper.ItemTouchHelper.SimpleCallback
-import android.support.v7.widget.{DefaultItemAnimator, LinearLayoutManager, RecyclerView, Toolbar}
 import android.text.style.TextAppearanceSpan
 import android.text.{SpannableStringBuilder, Spanned, TextUtils}
 import android.view._
 import android.widget.{CheckedTextView, ImageView, LinearLayout, Toast}
 import com.github.clans.fab.{FloatingActionButton, FloatingActionMenu}
+import com.github.shadowsocks.ShadowsocksApplication.app
 import com.github.shadowsocks.aidl.IShadowsocksServiceCallback
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.utils.{Key, Parser, TrafficMonitor, Utils}
 import com.github.shadowsocks.widget.UndoSnackbarManager
-import com.github.shadowsocks.ShadowsocksApplication.app
-import com.google.zxing.integration.android.IntentIntegrator
 import net.glxn.qrgen.android.QRCode
 
 import scala.collection.mutable.ArrayBuffer
 
 final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClickListener with ServiceBoundContext
   with View.OnClickListener with CreateNdefMessageCallback {
+
   private final class ProfileViewHolder(val view: View) extends RecyclerView.ViewHolder(view)
     with View.OnClickListener with View.OnKeyListener {
+
     var item: Profile = _
     private val text = itemView.findViewById(android.R.id.text1).asInstanceOf[CheckedTextView]
     itemView.setOnClickListener(this)
@@ -74,7 +97,7 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
       })
       shareBtn.setOnLongClickListener(_ => {
         Utils.positionToast(Toast.makeText(ProfileManagerActivity.this, R.string.share, Toast.LENGTH_SHORT), shareBtn,
-          getWindow, 0, Utils.dpToPx(ProfileManagerActivity.this, 8)).show
+          getWindow, 0, Utils.dpToPx(ProfileManagerActivity.this, 8)).show()
         true
       })
     }
@@ -83,7 +106,7 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
       val builder = new SpannableStringBuilder
       val tx = item.tx + txTotal
       val rx = item.rx + rxTotal
-      builder.append(item.name)
+      builder.append(if (isDemoMode) "Profile #" + item.id else item.name)
       if (tx != 0 || rx != 0) {
         val start = builder.length
         builder.append(getString(R.string.stat_profiles,
@@ -108,39 +131,42 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
 
     def onClick(v: View) {
       app.switchProfile(item.id)
-      finish
+      finish()
     }
 
-    def onKey(v: View, keyCode: Int, event: KeyEvent) = if (event.getAction == KeyEvent.ACTION_UP) keyCode match {
-      case KeyEvent.KEYCODE_DPAD_LEFT =>
-        val index = getAdapterPosition
-        profilesAdapter.remove(index)
-        undoManager.remove(index, item)
-        true
-      case _ => false
-    } else false
+    def onKey(v: View, keyCode: Int, event: KeyEvent): Boolean =
+      if (event.getAction == KeyEvent.ACTION_DOWN) keyCode match {
+        case KeyEvent.KEYCODE_DPAD_LEFT =>
+          val index = getAdapterPosition
+          if (index >= 0) {
+            profilesAdapter.remove(index)
+            undoManager.remove(index, item)
+            true
+          } else false
+        case _ => false
+      } else false
   }
 
   private class ProfilesAdapter extends RecyclerView.Adapter[ProfileViewHolder] {
     var profiles = new ArrayBuffer[Profile]
     profiles ++= app.profileManager.getAllProfiles.getOrElse(List.empty[Profile])
 
-    def getItemCount = profiles.length
+    def getItemCount: Int = profiles.length
 
-    def onBindViewHolder(vh: ProfileViewHolder, i: Int) = vh.bind(profiles(i))
+    def onBindViewHolder(vh: ProfileViewHolder, i: Int): Unit = vh.bind(profiles(i))
 
     def onCreateViewHolder(vg: ViewGroup, i: Int) =
       new ProfileViewHolder(LayoutInflater.from(vg.getContext).inflate(R.layout.layout_profiles_item, vg, false))
 
     def add(item: Profile) {
-      undoManager.flush
+      undoManager.flush()
       val pos = getItemCount
       profiles += item
       notifyItemInserted(pos)
     }
 
     def move(from: Int, to: Int) {
-      undoManager.flush
+      undoManager.flush()
       val step = if (from < to) 1 else -1
       val first = profiles(from)
       var previousOrder = profiles(from).userOrder
@@ -162,11 +188,11 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
       profiles.remove(pos)
       notifyItemRemoved(pos)
     }
-    def undo(actions: Iterator[(Int, Profile)]) = for ((index, item) <- actions) {
+    def undo(actions: Iterator[(Int, Profile)]): Unit = for ((index, item) <- actions) {
       profiles.insert(index, item)
       notifyItemInserted(index)
     }
-    def commit(actions: Iterator[(Int, Profile)]) = for ((index, item) <- actions) {
+    def commit(actions: Iterator[(Int, Profile)]): Unit = for ((_, item) <- actions) {
       app.profileManager.delProfile(item.id)
       if (item.id == app.profileId) app.profileId(-1)
     }
@@ -181,6 +207,7 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
   private var undoManager: UndoSnackbarManager[Profile] = _
 
   private lazy val clipboard = getSystemService(Context.CLIPBOARD_SERVICE).asInstanceOf[ClipboardManager]
+  private lazy val isDemoMode = Build.VERSION.SDK_INT >= 25 && getSystemService(classOf[UserManager]).isDemoUser
 
   private var nfcAdapter : NfcAdapter = _
   private var nfcShareItem: Array[Byte] = _
@@ -195,9 +222,11 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
     val toolbar = findViewById(R.id.toolbar).asInstanceOf[Toolbar]
     toolbar.setTitle(R.string.profiles)
     toolbar.setNavigationIcon(R.drawable.ic_navigation_close)
-    toolbar.setNavigationOnClickListener((v: View) => {
+    toolbar.setNavigationOnClickListener(_ => {
       val intent = getParentActivityIntent
-      if (intent == null) finish else navigateUpTo(intent)
+      if (shouldUpRecreateTask(intent) || isTaskRoot)
+        TaskStackBuilder.create(this).addNextIntentWithParentStack(intent).startActivities()
+      else finish()
     })
     toolbar.inflateMenu(R.menu.profile_manager_menu)
     toolbar.setOnMenuItemClickListener(this)
@@ -216,27 +245,27 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
     undoManager = new UndoSnackbarManager[Profile](profilesList, profilesAdapter.undo, profilesAdapter.commit)
     new ItemTouchHelper(new SimpleCallback(ItemTouchHelper.UP | ItemTouchHelper.DOWN,
       ItemTouchHelper.START | ItemTouchHelper.END) {
-      def onSwiped(viewHolder: ViewHolder, direction: Int) = {
+      def onSwiped(viewHolder: ViewHolder, direction: Int) {
         val index = viewHolder.getAdapterPosition
         profilesAdapter.remove(index)
         undoManager.remove(index, viewHolder.asInstanceOf[ProfileViewHolder].item)
       }
-      def onMove(recyclerView: RecyclerView, viewHolder: ViewHolder, target: ViewHolder) = {
+      def onMove(recyclerView: RecyclerView, viewHolder: ViewHolder, target: ViewHolder): Boolean = {
         profilesAdapter.move(viewHolder.getAdapterPosition, target.getAdapterPosition)
         true
       }
     }).attachToRecyclerView(profilesList)
 
     attachService(new IShadowsocksServiceCallback.Stub {
-      def stateChanged(state: Int, msg: String) = () // ignore
-      def trafficUpdated(txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long) =
+      def stateChanged(state: Int, profileName: String, msg: String): Unit = () // ignore
+      def trafficUpdated(txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long): Unit =
         if (selectedItem != null) selectedItem.updateText(txTotal, rxTotal)
     })
 
     if (app.settings.getBoolean(Key.profileTip, true)) {
-      app.editor.putBoolean(Key.profileTip, false).apply
+      app.editor.putBoolean(Key.profileTip, false).apply()
       new AlertDialog.Builder(this).setTitle(R.string.profile_manager_dialog)
-        .setMessage(R.string.profile_manager_dialog_content).setPositiveButton(R.string.gotcha, null).create.show
+        .setMessage(R.string.profile_manager_dialog_content).setPositiveButton(R.string.gotcha, null).create().show()
     }
 
     val intent = getIntent
@@ -246,14 +275,21 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
   def initFab() {
     menu = findViewById(R.id.menu).asInstanceOf[FloatingActionMenu]
     menu.setClosedOnTouchOutside(true)
+    val dm = AppCompatDrawableManager.get
     val manualAddFAB = findViewById(R.id.fab_manual_add).asInstanceOf[FloatingActionButton]
+    manualAddFAB.setImageDrawable(dm.getDrawable(this, R.drawable.ic_content_create))
     manualAddFAB.setOnClickListener(this)
     val qrcodeAddFAB = findViewById(R.id.fab_qrcode_add).asInstanceOf[FloatingActionButton]
+    qrcodeAddFAB.setImageDrawable(dm.getDrawable(this, R.drawable.ic_image_camera_alt))
     qrcodeAddFAB.setOnClickListener(this)
     val nfcAddFAB = findViewById(R.id.fab_nfc_add).asInstanceOf[FloatingActionButton]
+    nfcAddFAB.setImageDrawable(dm.getDrawable(this, R.drawable.ic_device_nfc))
     nfcAddFAB.setOnClickListener(this)
     val importAddFAB = findViewById(R.id.fab_import_add).asInstanceOf[FloatingActionButton]
+    importAddFAB.setImageDrawable(dm.getDrawable(this, R.drawable.ic_content_paste))
     importAddFAB.setOnClickListener(this)
+    menu.setOnMenuToggleListener(opened => if (opened) qrcodeAddFAB.setVisibility(
+      if (getPackageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA)) View.VISIBLE else View.GONE))
   }
 
 
@@ -262,7 +298,7 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
     updateNfcState()
   }
 
-  override def onNewIntent(intent: Intent): Unit ={
+  override def onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     handleShareIntent(intent)
   }
@@ -271,16 +307,14 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
     v.getId match {
       case R.id.fab_manual_add =>
         menu.toggle(true)
-        app.profileManager.reload(-1)
-        app.switchProfile(app.profileManager.save.id)
-        finish
+        val profile = app.profileManager.createProfile()
+        app.profileManager.updateProfile(profile)
+        app.switchProfile(profile.id)
+        finish()
       case R.id.fab_qrcode_add =>
         menu.toggle(false)
-        val integrator = new IntentIntegrator(ProfileManagerActivity.this)
-        val list = new java.util.ArrayList(IntentIntegrator.TARGET_ALL_KNOWN)
-        list.add("tw.com.quickmark")
-        integrator.setTargetApplications(list)
-        integrator.initiateScan()
+        val intent = new Intent(this, classOf[ScannerActivity])
+        startActivity(intent)
       case R.id.fab_nfc_add =>
         menu.toggle(true)
         val dialog = new AlertDialog.Builder(ProfileManagerActivity.this)
@@ -296,18 +330,18 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
         } else {
           dialog.setMessage(getString(R.string.add_profile_nfc_hint))
         }
-        dialog.show
+        dialog.show()
       case R.id.fab_import_add =>
         menu.toggle(true)
         if (clipboard.hasPrimaryClip) {
           val profiles = Parser.findAll(clipboard.getPrimaryClip.getItemAt(0).getText)
           if (profiles.nonEmpty) {
             profiles.foreach(app.profileManager.createProfile)
-            Toast.makeText(this, R.string.action_import_msg, Toast.LENGTH_SHORT).show
+            Toast.makeText(this, R.string.action_import_msg, Toast.LENGTH_SHORT).show()
             return
           }
         }
-        Toast.makeText(this, R.string.action_import_err, Toast.LENGTH_SHORT).show
+        Toast.makeText(this, R.string.action_import_err, Toast.LENGTH_SHORT).show()
     }
   }
 
@@ -363,20 +397,11 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
     unregisterCallback
   }
 
-  override def onDestroy {
+  override def onDestroy() {
     detachService()
-    undoManager.flush
+    undoManager.flush()
     app.profileManager.setProfileAddedListener(null)
-    super.onDestroy
-  }
-
-  override def onActivityResult(requestCode: Int, resultCode: Int, data: Intent) {
-    val scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
-    if (scanResult != null) {
-      val contents = scanResult.getContents
-      if (!TextUtils.isEmpty(contents))
-        Parser.findAll(contents).foreach(app.profileManager.createProfile)
-    }
+    super.onDestroy()
   }
 
   override def onBackPressed() {
@@ -391,8 +416,8 @@ final class ProfileManagerActivity extends AppCompatActivity with OnMenuItemClic
       app.profileManager.getAllProfiles match {
         case Some(profiles) =>
           clipboard.setPrimaryClip(ClipData.newPlainText(null, profiles.mkString("\n")))
-          Toast.makeText(this, R.string.action_export_msg, Toast.LENGTH_SHORT).show
-        case _ => Toast.makeText(this, R.string.action_export_err, Toast.LENGTH_SHORT).show
+          Toast.makeText(this, R.string.action_export_msg, Toast.LENGTH_SHORT).show()
+        case _ => Toast.makeText(this, R.string.action_export_err, Toast.LENGTH_SHORT).show()
       }
       true
     case _ => false

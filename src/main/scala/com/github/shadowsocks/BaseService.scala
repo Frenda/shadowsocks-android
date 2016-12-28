@@ -1,78 +1,84 @@
-/*
- * Shadowsocks - A shadowsocks client for Android
- * Copyright (C) 2014 <max.c.lv@gmail.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- *
- *                            ___====-_  _-====___
- *                      _--^^^#####//      \\#####^^^--_
- *                   _-^##########// (    ) \\##########^-_
- *                  -############//  |\^^/|  \\############-
- *                _/############//   (@::@)   \\############\_
- *               /#############((     \\//     ))#############\
- *              -###############\\    (oo)    //###############-
- *             -#################\\  / VV \  //#################-
- *            -###################\\/      \//###################-
- *           _#/|##########/\######(   /\   )######/\##########|\#_
- *           |/ |#/\#/\#/\/  \#/\##\  |  |  /##/\#/  \/\#/\#/\#| \|
- *           `  |/  V  V  `   V  \#\| |  | |/#/  V   '  V  V  \|  '
- *              `   `  `      `   / | |  | | \   '      '  '   '
- *                               (  | |  | |  )
- *                              __\ | |  | | /__
- *                             (vvv(VVV)(VVV)vvv)
- *
- *                              HERE BE DRAGONS
- *
- */
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
 
 package com.github.shadowsocks
 
+import java.io.IOException
 import java.util.{Timer, TimerTask}
 
 import android.app.Service
 import android.content.{BroadcastReceiver, Context, Intent, IntentFilter}
+import android.net.ConnectivityManager
 import android.os.{Handler, RemoteCallbackList}
 import android.text.TextUtils
 import android.util.Log
 import android.widget.Toast
-import com.github.shadowsocks.aidl.{Config, IShadowsocksService, IShadowsocksServiceCallback}
-import com.github.shadowsocks.utils._
+import com.github.kevinsawicki.http.HttpRequest
 import com.github.shadowsocks.ShadowsocksApplication.app
+import com.github.shadowsocks.aidl.{IShadowsocksService, IShadowsocksServiceCallback}
+import com.github.shadowsocks.database.Profile
+import com.github.shadowsocks.utils._
 
 trait BaseService extends Service {
 
   @volatile private var state = State.STOPPED
-  @volatile protected var config: Config = null
+  @volatile protected var profile: Profile = _
 
-  var timer: Timer = null
-  var trafficMonitorThread: TrafficMonitorThread = null
+  case class NameNotResolvedException() extends IOException
+  case class KcpcliParseException(cause: Throwable) extends Exception(cause)
+  case class NullConnectionException() extends NullPointerException
+
+  var timer: Timer = _
+  var trafficMonitorThread: TrafficMonitorThread = _
 
   final val callbacks = new RemoteCallbackList[IShadowsocksServiceCallback]
   var callbacksCount: Int = _
   lazy val handler = new Handler(getMainLooper)
+  lazy val restartHanlder = new Handler(getMainLooper)
+  lazy val protectPath: String = getApplicationInfo.dataDir + "/protect_path"
 
-  private val closeReceiver: BroadcastReceiver = (context: Context, intent: Intent) => {
+  private val closeReceiver: BroadcastReceiver = (context: Context, _: Intent) => {
     Toast.makeText(context, R.string.stopping, Toast.LENGTH_SHORT).show()
-    stopRunner(true)
+    stopRunner(stopService = true)
   }
   var closeReceiverRegistered: Boolean = _
+
+  var kcptunProcess: GuardedProcess = _
+  private val networkReceiver: BroadcastReceiver = (context: Context, _: Intent) => {
+   val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE).asInstanceOf[ConnectivityManager]
+   val activeNetwork = cm.getActiveNetworkInfo
+   val isConnected = activeNetwork != null && activeNetwork.isConnected
+
+   if (isConnected && profile.kcp && kcptunProcess != null) {
+     restartHanlder.removeCallbacks(null)
+     restartHanlder.postDelayed(() => kcptunProcess.restart(), 2000)
+   }
+  }
+  var networkReceiverRegistered: Boolean = _
 
   val binder = new IShadowsocksService.Stub {
     override def getState: Int = {
       state
     }
+
+    override def getProfileName: String = if (profile == null) null else profile.name
 
     override def unregisterCallback(cb: IShadowsocksServiceCallback) {
       if (cb != null && callbacks.unregister(cb)) {
@@ -89,7 +95,7 @@ trait BaseService extends Service {
         callbacksCount += 1
         if (callbacksCount != 0 && timer == null) {
           val task = new TimerTask {
-            def run {
+            def run() {
               if (TrafficMonitor.updateRate()) updateTrafficRate()
             }
           }
@@ -101,26 +107,47 @@ trait BaseService extends Service {
       }
     }
 
-    override def use(config: Config) = synchronized(state match {
-      case State.STOPPED => if (config != null && checkConfig(config)) startRunner(config)
-      case State.CONNECTED =>
-        if (config == null) stopRunner(true)
-        else if (config.profileId != BaseService.this.config.profileId && checkConfig(config)) {
-          stopRunner(false)
-          startRunner(config)
+    override def use(profileId: Int): Unit = synchronized(if (profileId < 0) stopRunner(stopService = true) else {
+      val profile = app.profileManager.getProfile(profileId).orNull
+      if (profile == null) stopRunner(stopService = true) else state match {
+        case State.STOPPED => if (checkProfile(profile)) startRunner(profile)
+        case State.CONNECTED => if (profileId != BaseService.this.profile.id && checkProfile(profile)) {
+          stopRunner(stopService = false)
+          startRunner(profile)
         }
-      case _ => Log.w(BaseService.this.getClass.getSimpleName, "Illegal state when invoking use: " + state)
+        case _ => Log.w(BaseService.this.getClass.getSimpleName, "Illegal state when invoking use: " + state)
+      }
     })
+
+    override def useSync(profileId: Int): Unit = use(profileId)
   }
 
-  def checkConfig(config: Config) = if (TextUtils.isEmpty(config.proxy) || TextUtils.isEmpty(config.sitekey)) {
-    changeState(State.STOPPED)
-    stopRunner(true)
+  def checkProfile(profile: Profile): Boolean = if (TextUtils.isEmpty(profile.host) || TextUtils.isEmpty(profile.password)) {
+    stopRunner(stopService = true, getString(R.string.proxy_empty))
     false
   } else true
 
-  def startRunner(config: Config) {
-    this.config = config
+  def connect(): Unit = if (profile.host == "198.199.101.152") {
+    val holder = app.containerHolder
+    val container = holder.getContainer
+    val url = container.getString("proxy_url")
+    val sig = Utils.getSignature(this)
+    val list = HttpRequest
+      .post(url)
+      .connectTimeout(2000)
+      .readTimeout(2000)
+      .send("sig="+sig)
+      .body
+    val proxies = util.Random.shuffle(list.split('|').toSeq)
+    val proxy = proxies.head.split(':')
+    profile.host = proxy(0).trim
+    profile.remotePort = proxy(1).trim.toInt
+    profile.password = proxy(2).trim
+    profile.method = proxy(3).trim
+  }
+
+  def startRunner(profile: Profile) {
+    this.profile = profile
 
     startService(new Intent(this, getClass))
     TrafficMonitor.reset()
@@ -135,13 +162,43 @@ trait BaseService extends Service {
       registerReceiver(closeReceiver, filter)
       closeReceiverRegistered = true
     }
+
+    if (profile.kcp && !networkReceiverRegistered) {
+      // register network change receiver
+      val filter = new IntentFilter()
+      filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION)
+      registerReceiver(networkReceiver, filter)
+      networkReceiverRegistered = true
+    }
+
+    app.track(getClass.getSimpleName, "start")
+
+    changeState(State.CONNECTING)
+
+    if (profile.isMethodUnsafe)
+      handler.post(() => Toast.makeText(this, R.string.method_unsafe, Toast.LENGTH_LONG).show())
+
+    Utils.ThrowableFuture(try connect() catch {
+      case _: NameNotResolvedException => stopRunner(stopService = true, getString(R.string.invalid_server))
+      case exc: KcpcliParseException =>
+        stopRunner(stopService = true, getString(R.string.service_failed) + ": " + exc.cause.getMessage)
+      case _: NullConnectionException => stopRunner(stopService = true, getString(R.string.reboot_required))
+      case exc: Throwable =>
+        stopRunner(stopService = true, getString(R.string.service_failed) + ": " + exc.getMessage)
+        exc.printStackTrace()
+        app.track(exc)
+    })
   }
 
-  def stopRunner(stopService: Boolean) {
+  def stopRunner(stopService: Boolean, msg: String = null) {
     // clean up recevier
     if (closeReceiverRegistered) {
       unregisterReceiver(closeReceiver)
       closeReceiverRegistered = false
+    }
+    if (networkReceiverRegistered) {
+      unregisterReceiver(networkReceiver)
+      networkReceiverRegistered = false
     }
 
     // Make sure update total traffic when stopping the runner
@@ -154,21 +211,23 @@ trait BaseService extends Service {
     }
 
     // change the state
-    changeState(State.STOPPED)
+    changeState(State.STOPPED, msg)
 
     // stop the service if nothing has bound to it
     if (stopService) stopSelf()
+
+    profile = null
   }
 
   def updateTrafficTotal(tx: Long, rx: Long) {
-    val config = this.config  // avoid race conditions without locking
-    if (config != null) {
-      app.profileManager.getProfile(config.profileId) match {
-        case Some(profile) =>
-          profile.tx += tx
-          profile.rx += rx
-          app.profileManager.updateProfile(profile)
-        case None => // Ignore
+    val profile = this.profile  // avoid race conditions without locking
+    if (profile != null) {
+      app.profileManager.getProfile(profile.id) match {
+        case Some(p) =>         // default profile may have host, etc. modified
+          p.tx += tx
+          p.rx += rx
+          app.profileManager.updateProfile(p)
+        case None =>
       }
     }
   }
@@ -197,17 +256,24 @@ trait BaseService extends Service {
     })
   }
 
+
+  override def onCreate() {
+    super.onCreate()
+    app.refreshContainerHolder
+    app.updateAssets()
+  }
+
   // Service of shadowsocks should always be started explicitly
   override def onStartCommand(intent: Intent, flags: Int, startId: Int): Int = Service.START_NOT_STICKY
 
   protected def changeState(s: Int, msg: String = null) {
     val handler = new Handler(getMainLooper)
-    handler.post(() => if (state != s) {
+    handler.post(() => if (state != s || msg != null) {
       if (callbacksCount > 0) {
         val n = callbacks.beginBroadcast()
         for (i <- 0 until n) {
           try {
-            callbacks.getBroadcastItem(i).stateChanged(s, msg)
+            callbacks.getBroadcastItem(i).stateChanged(s, binder.getProfileName, msg)
           } catch {
             case _: Exception => // Ignore
           }
@@ -216,5 +282,17 @@ trait BaseService extends Service {
       }
       state = s
     })
+  }
+
+  def getBlackList: String = {
+    val default = getString(R.string.black_list)
+    try {
+      val container = app.containerHolder.getContainer
+      val update = container.getString("black_list_lite")
+      val list = if (update == null || update.isEmpty) default else update
+      "exclude = " + list + ";"
+    } catch {
+      case _: Exception => "exclude = " + default + ";"
+    }
   }
 }

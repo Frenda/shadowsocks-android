@@ -1,53 +1,33 @@
-/*
- * Shadowsocks - A shadowsocks client for Android
- * Copyright (C) 2014 <max.c.lv@gmail.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- *
- *                            ___====-_  _-====___
- *                      _--^^^#####//      \\#####^^^--_
- *                   _-^##########// (    ) \\##########^-_
- *                  -############//  |\^^/|  \\############-
- *                _/############//   (@::@)   \\############\_
- *               /#############((     \\//     ))#############\
- *              -###############\\    (oo)    //###############-
- *             -#################\\  / VV \  //#################-
- *            -###################\\/      \//###################-
- *           _#/|##########/\######(   /\   )######/\##########|\#_
- *           |/ |#/\#/\#/\/  \#/\##\  |  |  /##/\#/  \/\#/\#/\#| \|
- *           `  |/  V  V  `   V  \#\| |  | |/#/  V   '  V  V  \|  '
- *              `   `  `      `   / | |  | | \   '      '  '   '
- *                               (  | |  | |  )
- *                              __\ | |  | | /__
- *                             (vvv(VVV)(VVV)vvv)
- *
- *                              HERE BE DRAGONS
- *
- */
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks
 
-import java.io.{FileOutputStream, IOException, InputStream, OutputStream}
 import java.lang.System.currentTimeMillis
 import java.net.{HttpURLConnection, URL}
 import java.util
-import java.util.Locale
+import java.util.{GregorianCalendar, Locale}
 
 import android.app.backup.BackupManager
 import android.app.{Activity, ProgressDialog}
 import android.content._
-import android.content.res.AssetManager
 import android.graphics.Typeface
 import android.net.VpnService
 import android.os._
@@ -59,14 +39,14 @@ import android.util.Log
 import android.view.{View, ViewGroup}
 import android.widget._
 import com.github.jorgecastilloprz.FABProgressCircle
+import com.github.shadowsocks.ShadowsocksApplication.app
 import com.github.shadowsocks.aidl.IShadowsocksServiceCallback
 import com.github.shadowsocks.database._
 import com.github.shadowsocks.utils.CloseUtils._
 import com.github.shadowsocks.utils._
-import com.github.shadowsocks.ShadowsocksApplication.app
 import com.google.android.gms.ads.{AdRequest, AdSize, AdView}
 
-import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 object Typefaces {
   def get(c: Context, assetPath: String): Typeface = {
@@ -77,6 +57,7 @@ object Typefaces {
         } catch {
           case e: Exception =>
             Log.e(TAG, "Could not get typeface '" + assetPath + "' because " + e.getMessage)
+            app.track(e)
             return null
         }
       }
@@ -92,15 +73,13 @@ object Shadowsocks {
   // Constants
   private final val TAG = "Shadowsocks"
   private final val REQUEST_CONNECT = 1
-  private val EXECUTABLES = Array(Executable.PDNSD, Executable.REDSOCKS, Executable.SS_TUNNEL, Executable.SS_LOCAL,
-    Executable.TUN2SOCKS)
 }
 
 class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
   import Shadowsocks._
 
   // Variables
-  var serviceStarted = false
+  var serviceStarted: Boolean = _
   var fab: FloatingActionButton = _
   var fabProgressCircle: FABProgressCircle = _
   var progressDialog: ProgressDialog = _
@@ -109,8 +88,8 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
 
   // Services
   private val callback = new IShadowsocksServiceCallback.Stub {
-    def stateChanged(s: Int, m: String) {
-      handler.post(() => if (state != s) {
+    def stateChanged(s: Int, profileName: String, m: String) {
+      handler.post(() => {
         s match {
           case State.CONNECTING =>
             fab.setBackgroundTintList(greyTint)
@@ -144,7 +123,7 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
                 getString(R.string.vpn_error).formatLocal(Locale.ENGLISH, m), Snackbar.LENGTH_LONG)
               if (m == getString(R.string.nat_no_root)) snackbar.setAction(R.string.switch_to_vpn,
                 (_ => preferences.natSwitch.setChecked(false)): View.OnClickListener)
-              snackbar.show
+              snackbar.show()
               Log.e(TAG, "Error to start VPN service: " + m)
             }
             preferences.setEnabled(true)
@@ -172,7 +151,7 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
     rxRateText.setText(TrafficMonitor.formatTraffic(rxRate) + "/s")
   }
 
-  def attachService: Unit = attachService(callback)
+  def attachServiceCallback(): Unit = attachService(callback)
 
   override def onServiceConnected() {
     // Update the UI
@@ -181,32 +160,7 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
     if (Build.VERSION.SDK_INT >= 21 && app.isNatEnabled) {
       val snackbar = Snackbar.make(findViewById(android.R.id.content), R.string.nat_deprecated, Snackbar.LENGTH_LONG)
       snackbar.setAction(R.string.switch_to_vpn, (_ => preferences.natSwitch.setChecked(false)): View.OnClickListener)
-      snackbar.show
-    }
-
-    if (!app.settings.getBoolean(app.getVersionName, false)) {
-      app.editor.putBoolean(app.getVersionName, true).apply()
-      try {
-        // Workaround that convert port(String) to port(Int)
-        val oldLocalPort = app.settings.getString(Key.localPort, "")
-        val oldRemotePort = app.settings.getString(Key.remotePort, "")
-
-        if (oldLocalPort != "") {
-          app.editor.putInt(Key.localPort, oldLocalPort.toInt).apply()
-        }
-        if (oldRemotePort != "") {
-          app.editor.putInt(Key.remotePort, oldRemotePort.toInt).apply()
-        }
-      } catch {
-        case ex: Exception => // Ignore
-      }
-      val oldProxiedApps = app.settings.getString(Key.proxied, "")
-      if (oldProxiedApps.contains('|'))
-        app.editor.putString(Key.proxied, DBHelper.updateProxiedApps(this, oldProxiedApps)).apply()
-
-      recovery()
-
-      updateCurrentProfile()
+      snackbar.show()
     }
   }
 
@@ -214,10 +168,10 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
     if (fab != null) fab.setEnabled(false)
   }
 
-  override def binderDied {
-    detachService
-    crashRecovery
-    attachService
+  override def binderDied() {
+    detachService()
+    app.crashRecovery()
+    attachServiceCallback()
   }
 
   private var testCount: Int = _
@@ -254,85 +208,6 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
     }
   }
 
-  private def copyAssets(path: String) {
-    val assetManager: AssetManager = getAssets
-    var files: Array[String] = null
-    try {
-      files = assetManager.list(path)
-    } catch {
-      case e: IOException =>
-        Log.e(TAG, e.getMessage)
-    }
-    if (files != null) {
-      for (file <- files) {
-        var in: InputStream = null
-        var out: OutputStream = null
-        try {
-          if (path.length > 0) {
-            in = assetManager.open(path + "/" + file)
-          } else {
-            in = assetManager.open(file)
-          }
-          out = new FileOutputStream(getApplicationInfo.dataDir + "/" + file)
-          copyFile(in, out)
-          in.close()
-          in = null
-          out.flush()
-          out.close()
-          out = null
-        } catch {
-          case ex: Exception =>
-            Log.e(TAG, ex.getMessage)
-        }
-      }
-    }
-  }
-
-  private def copyFile(in: InputStream, out: OutputStream) {
-    val buffer: Array[Byte] = new Array[Byte](1024)
-    var read: Int = 0
-    while ( {
-      read = in.read(buffer)
-      read
-    } != -1) {
-      out.write(buffer, 0, read)
-    }
-  }
-
-  def crashRecovery() {
-    val cmd = new ArrayBuffer[String]()
-
-    for (task <- Array("ss-local", "ss-tunnel", "pdnsd", "redsocks", "tun2socks")) {
-      cmd.append("chmod 666 %s/%s-nat.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
-      cmd.append("chmod 666 %s/%s-vpn.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
-    }
-
-    if (app.isNatEnabled) Console.runRootCommand(cmd.toArray) else Console.runCommand(cmd.toArray)
-
-    cmd.clear()
-
-    for (task <- Array("ss-local", "ss-tunnel", "pdnsd", "redsocks", "tun2socks")) {
-      try {
-        val pid_nat = scala.io.Source.fromFile(getApplicationInfo.dataDir + "/" + task + "-nat.pid").mkString.trim.toInt
-        val pid_vpn = scala.io.Source.fromFile(getApplicationInfo.dataDir + "/" + task + "-vpn.pid").mkString.trim.toInt
-        cmd.append("kill -9 %d".formatLocal(Locale.ENGLISH, pid_nat))
-        cmd.append("kill -9 %d".formatLocal(Locale.ENGLISH, pid_vpn))
-        Process.killProcess(pid_nat)
-        Process.killProcess(pid_vpn)
-      } catch {
-        case e: Throwable => // Ignore
-      }
-      cmd.append("rm -f %s/%s-nat.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
-      cmd.append("rm -f %s/%s-nat.conf".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
-      cmd.append("rm -f %s/%s-vpn.pid".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
-      cmd.append("rm -f %s/%s-vpn.conf".formatLocal(Locale.ENGLISH, getApplicationInfo.dataDir, task))
-    }
-    if (app.isNatEnabled) {
-      Console.runRootCommand(cmd.toArray)
-      Console.runRootCommand(Utils.iptables + " -t nat -F OUTPUT")
-    } else Console.runCommand(cmd.toArray)
-  }
-
   def cancelStart() {
     clearDialog()
     changeSwitch(checked = false)
@@ -363,10 +238,12 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
     field.setAccessible(true)
     val title = field.get(toolbar).asInstanceOf[TextView]
     title.setFocusable(true)
+    title.setGravity(0x10)
+    title.getLayoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT
     title.setOnClickListener(_ => startActivity(new Intent(this, classOf[ProfileManagerActivity])))
     val typedArray = obtainStyledAttributes(Array(R.attr.selectableItemBackgroundBorderless))
     title.setBackgroundResource(typedArray.getResourceId(0, 0))
-    typedArray.recycle
+    typedArray.recycle()
     val tf = Typefaces.get(this, "fonts/Iceland.ttf")
     if (tf != null) title.setTypeface(tf)
     title.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_arrow_drop_down, 0)
@@ -410,7 +287,7 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
             synchronized(if (testCount == id && app.isVpnEnabled) handler.post(() =>
               if (success) connectionTestText.setText(result) else {
                 connectionTestText.setText(R.string.connection_test_fail)
-                Snackbar.make(findViewById(android.R.id.content), result, Snackbar.LENGTH_LONG).show
+                Snackbar.make(findViewById(android.R.id.content), result, Snackbar.LENGTH_LONG).show()
               }))
           }
         }
@@ -420,21 +297,16 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
     fab = findViewById(R.id.fab).asInstanceOf[FloatingActionButton]
     fabProgressCircle = findViewById(R.id.fabProgressCircle).asInstanceOf[FABProgressCircle]
     fab.setOnClickListener(_ => if (serviceStarted) serviceStop()
-      else if (checkText(Key.proxy) && checkText(Key.sitekey) && bgService != null) prepareStartService()
+      else if (bgService != null) prepareStartService()
       else changeSwitch(checked = false))
     fab.setOnLongClickListener((v: View) => {
       Utils.positionToast(Toast.makeText(this, if (serviceStarted) R.string.stop else R.string.connect,
-        Toast.LENGTH_SHORT), fab, getWindow, 0, Utils.dpToPx(this, 8)).show
+        Toast.LENGTH_SHORT), fab, getWindow, 0, Utils.dpToPx(this, 8)).show()
       true
     })
     updateTraffic(0, 0, 0, 0)
 
-    handler.post(() => attachService)
-  }
-
-  protected override def onPause() {
-    super.onPause()
-    app.profileManager.save
+    handler.post(attachServiceCallback)
   }
 
   private def hideCircle() {
@@ -462,10 +334,11 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
           preferences.setEnabled(false)
           fabProgressCircle.postDelayed(hideCircle, 100)
           stat.setVisibility(View.VISIBLE)
-          if (resetConnectionTest) if (app.isNatEnabled) connectionTestText.setVisibility(View.GONE) else {
-            connectionTestText.setVisibility(View.VISIBLE)
-            connectionTestText.setText(getString(R.string.connection_test_pending))
-          }
+          if (resetConnectionTest || state != State.CONNECTED)
+            if (app.isNatEnabled) connectionTestText.setVisibility(View.GONE) else {
+              connectionTestText.setVisibility(View.VISIBLE)
+              connectionTestText.setText(getString(R.string.connection_test_pending))
+            }
         case State.STOPPING =>
           fab.setBackgroundTintList(greyTint)
           serviceStarted = false
@@ -487,96 +360,83 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
 
   private def updateCurrentProfile() = {
     // Check if current profile changed
-    if (app.profileId != currentProfile.id) {
-      currentProfile = app.currentProfile match {
+    if (preferences.profile == null || app.profileId != preferences.profile.id) {
+      updatePreferenceScreen(app.currentProfile match {
         case Some(profile) => profile // updated
         case None =>                  // removed
           app.switchProfile((app.profileManager.getFirstProfile match {
             case Some(first) => first
             case None => app.profileManager.createDefault()
           }).id)
-      }
-
-      updatePreferenceScreen()
+      })
 
       if (serviceStarted) serviceLoad()
 
       true
-    } else false
+    } else {
+      preferences.refreshProfile()
+      false
+    }
   }
 
   protected override def onResume() {
     super.onResume()
 
-    ConfigUtils.refresh(this)
+    app.refreshContainerHolder
 
     updateState(updateCurrentProfile())
   }
 
-  private def updatePreferenceScreen() {
-    val profile = currentProfile
+  private def updatePreferenceScreen(profile: Profile) {
     if (profile.host == "198.199.101.152") if (adView == null) {
       adView = new AdView(this)
       adView.setAdUnitId("ca-app-pub-9097031975646651/7760346322")
       adView.setAdSize(AdSize.SMART_BANNER)
       preferences.getView.asInstanceOf[ViewGroup].addView(adView, 1)
-      adView.loadAd(new AdRequest.Builder().build())
+
+      // Demographics
+      val random = new Random()
+      val adBuilder = new AdRequest.Builder()
+      adBuilder.setGender(AdRequest.GENDER_MALE)
+      val year = 1975 + random.nextInt(40)
+      val month = 1 + random.nextInt(12)
+      val day = random.nextInt(28)
+      adBuilder.setBirthday(new GregorianCalendar(year, month, day).getTime)
+
+      // Load Ad
+      adView.loadAd(adBuilder.build())
     } else adView.setVisibility(View.VISIBLE) else if (adView != null) adView.setVisibility(View.GONE)
 
-    preferences.update(profile)
+    preferences.setProfile(profile)
   }
 
   override def onStart() {
     super.onStart()
-    registerCallback
+    registerCallback()
   }
   override def onStop() {
     super.onStop()
-    unregisterCallback
+    unregisterCallback()
     clearDialog()
   }
 
-  private var _isDestroyed: Boolean = _
-  override def isDestroyed = if (Build.VERSION.SDK_INT >= 17) super.isDestroyed else _isDestroyed
   override def onDestroy() {
     super.onDestroy()
-    _isDestroyed = true
     detachService()
     new BackupManager(this).dataChanged()
     handler.removeCallbacksAndMessages(null)
-  }
-
-  def reset() {
-    crashRecovery()
-
-    copyAssets(System.getABI)
-
-    val ab = new ArrayBuffer[String]
-    for (executable <- EXECUTABLES) {
-      ab.append("chmod 755 " + getApplicationInfo.dataDir + "/" + executable)
-    }
-    Console.runCommand(ab.toArray)
   }
 
   def recovery() {
     if (serviceStarted) serviceStop()
     val h = showProgress(R.string.recovering)
     Utils.ThrowableFuture {
-      reset()
+      app.copyAssets()
       h.sendEmptyMessage(0)
     }
   }
 
-  def flushDnsCache() {
-    val h = showProgress(R.string.flushing)
-    Utils.ThrowableFuture {
-      if (!Utils.toggleAirplaneMode(getBaseContext)) h.post(() => Snackbar.make(findViewById(android.R.id.content),
-        R.string.flush_dnscache_no_root, Snackbar.LENGTH_LONG).show)
-      h.sendEmptyMessage(0)
-    }
-  }
-
-  override def onActivityResult(requestCode: Int, resultCode: Int, data: Intent) = resultCode match {
+  override def onActivityResult(requestCode: Int, resultCode: Int, data: Intent): Unit = resultCode match {
     case Activity.RESULT_OK =>
       serviceLoad()
     case _ =>
@@ -585,19 +445,12 @@ class Shadowsocks extends AppCompatActivity with ServiceBoundContext {
   }
 
   def serviceStop() {
-    if (bgService != null) bgService.use(null)
-  }
-
-  def checkText(key: String): Boolean = {
-    val text = app.settings.getString(key, "")
-    if (text != null && text.length > 0) return true
-    Snackbar.make(findViewById(android.R.id.content), R.string.proxy_empty, Snackbar.LENGTH_LONG).show
-    false
+    if (bgService != null) bgService.use(-1)
   }
 
   /** Called when connect button is clicked. */
   def serviceLoad() {
-    bgService.use(ConfigUtils.loadFromSharedPreferences)
+    bgService.use(app.profileId)
 
     if (app.isVpnEnabled) {
       changeSwitch(checked = false)

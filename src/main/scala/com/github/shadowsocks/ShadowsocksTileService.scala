@@ -1,3 +1,23 @@
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks
 
 import android.annotation.TargetApi
@@ -5,70 +25,54 @@ import android.graphics.drawable.Icon
 import android.service.quicksettings.{Tile, TileService}
 import com.github.shadowsocks.aidl.IShadowsocksServiceCallback
 import com.github.shadowsocks.utils.{State, Utils}
-import com.github.shadowsocks.ShadowsocksApplication.app
 
 /**
   * @author Mygod
   */
-object ShadowsocksTileService {
-  var running: Boolean = _
-}
-
 @TargetApi(24)
 final class ShadowsocksTileService extends TileService with ServiceBoundContext {
-  import ShadowsocksTileService._
 
   private lazy val iconIdle = Icon.createWithResource(this, R.drawable.ic_start_idle).setTint(0x80ffffff)
   private lazy val iconBusy = Icon.createWithResource(this, R.drawable.ic_start_busy)
   private lazy val iconConnected = Icon.createWithResource(this, R.drawable.ic_start_connected)
   private lazy val callback = new IShadowsocksServiceCallback.Stub {
-    def trafficUpdated(txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long) = ()
-    def stateChanged(state: Int, msg: String) {
+    def trafficUpdated(txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long): Unit = ()
+    def stateChanged(state: Int, profileName: String, msg: String) {
       val tile = getQsTile
-      state match {
-        case State.STOPPED =>
-          tile.setIcon(iconIdle)
-          tile.setLabel(getString(R.string.app_name))
-          tile.setState(Tile.STATE_INACTIVE)
-        case State.CONNECTED =>
-          tile.setIcon(iconConnected)
-          tile.setLabel(app.currentProfile match {
-            case Some(profile) => profile.name
-            case None => getString(R.string.app_name)
-          })
-          tile.setState(Tile.STATE_ACTIVE)
-        case _ =>
-          tile.setIcon(iconBusy)
-          tile.setLabel(getString(R.string.app_name))
-          tile.setState(Tile.STATE_UNAVAILABLE)
+      if (tile != null) {
+        state match {
+          case State.STOPPED =>
+            tile.setIcon(iconIdle)
+            tile.setLabel(getString(R.string.app_name))
+            tile.setState(Tile.STATE_INACTIVE)
+          case State.CONNECTED =>
+            tile.setIcon(iconConnected)
+            tile.setLabel(if (profileName == null) getString(R.string.app_name) else profileName)
+            tile.setState(Tile.STATE_ACTIVE)
+          case _ =>
+            tile.setIcon(iconBusy)
+            tile.setLabel(getString(R.string.app_name))
+            tile.setState(Tile.STATE_UNAVAILABLE)
+        }
+        tile.updateTile()
       }
-      tile.updateTile
     }
   }
 
-  override def onServiceConnected = callback.stateChanged(bgService.getState, null)
+  override def onServiceConnected(): Unit = callback.stateChanged(bgService.getState, bgService.getProfileName, null)
 
-  override def onCreate {
-    super.onCreate
-    running = true
-  }
-  override def onDestroy {
-    super.onDestroy
-    running = false
-  }
-
-  override def onStartListening {
-    super.onStartListening
+  override def onStartListening() {
+    super.onStartListening()
     attachService(callback)
   }
-  override def onStopListening {
-    super.onStopListening
-    detachService // just in case the user switches to NAT mode, also saves battery
+  override def onStopListening() {
+    super.onStopListening()
+    detachService() // just in case the user switches to NAT mode, also saves battery
   }
 
-  override def onClick = if (isLocked) unlockAndRun(toggle) else toggle()
+  override def onClick(): Unit = if (isLocked) unlockAndRun(toggle) else toggle()
 
-  private def toggle() = bgService.getState match {
+  private def toggle() = if (bgService != null) bgService.getState match {
     case State.STOPPED => Utils.startSsService(this)
     case State.CONNECTED => Utils.stopSsService(this)
     case _ => // ignore

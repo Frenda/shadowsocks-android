@@ -1,3 +1,23 @@
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks
 
 import android.content.{ComponentName, Context, Intent, ServiceConnection}
@@ -15,34 +35,34 @@ trait ServiceBoundContext extends Context with IBinder.DeathRecipient {
       binder = service
       service.linkToDeath(ServiceBoundContext.this, 0)
       bgService = IShadowsocksService.Stub.asInterface(service)
-      registerCallback
+      registerCallback()
       ServiceBoundContext.this.onServiceConnected()
     }
     override def onServiceDisconnected(name: ComponentName) {
-      unregisterCallback
+      unregisterCallback()
       ServiceBoundContext.this.onServiceDisconnected()
       bgService = null
       binder = null
     }
   }
 
-  protected def registerCallback = if (bgService != null && callback != null && !callbackRegistered) try {
+  protected def registerCallback(): Unit = if (bgService != null && callback != null && !callbackRegistered) try {
     bgService.registerCallback(callback)
     callbackRegistered = true
   } catch {
-    case ignored: RemoteException => // Nothing
+    case _: RemoteException => // Nothing
   }
 
-  protected def unregisterCallback = {
+  protected def unregisterCallback() {
     if (bgService != null && callback != null && callbackRegistered) try bgService.unregisterCallback(callback) catch {
-      case ignored: RemoteException =>
+      case _: RemoteException =>
     }
     callbackRegistered = false
   }
 
-  def onServiceConnected() = ()
-  def onServiceDisconnected() = ()
-  override def binderDied = ()
+  def onServiceConnected(): Unit = ()
+  def onServiceDisconnected(): Unit = ()
+  override def binderDied(): Unit = ()
 
   private var callback: IShadowsocksServiceCallback.Stub = _
   private var connection: ShadowsocksServiceConnection = _
@@ -66,10 +86,12 @@ trait ServiceBoundContext extends Context with IBinder.DeathRecipient {
   }
 
   def detachService() {
-    unregisterCallback
+    unregisterCallback()
     callback = null
     if (connection != null) {
-      unbindService(connection)
+      try unbindService(connection) catch {
+        case _: IllegalArgumentException => // ignore
+      }
       connection = null
     }
     if (binder != null) {

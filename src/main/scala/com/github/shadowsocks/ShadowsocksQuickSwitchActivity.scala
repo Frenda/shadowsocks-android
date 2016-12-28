@@ -1,5 +1,26 @@
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks
 
+import android.content.pm.ShortcutManager
 import android.content.res.Resources
 import android.os.{Build, Bundle}
 import android.support.v7.app.AppCompatActivity
@@ -19,7 +40,7 @@ class ShadowsocksQuickSwitchActivity extends AppCompatActivity {
     {
       val typedArray = obtainStyledAttributes(Array(android.R.attr.selectableItemBackground))
       view.setBackgroundResource(typedArray.getResourceId(0, 0))
-      typedArray.recycle
+      typedArray.recycle()
     }
     private var item: Profile = _
     private val text = itemView.findViewById(android.R.id.text1).asInstanceOf[CheckedTextView]
@@ -34,16 +55,16 @@ class ShadowsocksQuickSwitchActivity extends AppCompatActivity {
     def onClick(v: View) {
       app.switchProfile(item.id)
       Utils.startSsService(ShadowsocksQuickSwitchActivity.this)
-      finish
+      finish()
     }
   }
 
   private class ProfilesAdapter extends RecyclerView.Adapter[ProfileViewHolder] {
-    val profiles = app.profileManager.getAllProfiles.getOrElse(List.empty[Profile])
+    val profiles: List[Profile] = app.profileManager.getAllProfiles.getOrElse(List.empty[Profile])
 
-    def getItemCount = profiles.length
+    def getItemCount: Int = profiles.length
 
-    def onBindViewHolder(vh: ProfileViewHolder, i: Int) = i match {
+    def onBindViewHolder(vh: ProfileViewHolder, i: Int): Unit = i match {
       case _ => vh.bind(profiles(i))
     }
 
@@ -68,7 +89,8 @@ class ShadowsocksQuickSwitchActivity extends AppCompatActivity {
     profilesList.setItemAnimator(new DefaultItemAnimator)
     profilesList.setAdapter(profilesAdapter)
     if (app.profileId >= 0) lm.scrollToPosition(profilesAdapter.profiles.zipWithIndex.collectFirst {
-      case (profile, i) if profile.id == app.profileId => i + 1
+      case (profile, i) if profile.id == app.profileId => i
     }.getOrElse(0))
+    if (Build.VERSION.SDK_INT >= 25) getSystemService(classOf[ShortcutManager]).reportShortcutUsed("switch")
   }
 }

@@ -1,41 +1,22 @@
-/*
- * Shadowsocks - A shadowsocks client for Android
- * Copyright (C) 2014 <max.c.lv@gmail.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- *
- *                            ___====-_  _-====___
- *                      _--^^^#####//      \\#####^^^--_
- *                   _-^##########// (    ) \\##########^-_
- *                  -############//  |\^^/|  \\############-
- *                _/############//   (@::@)   \\############\_
- *               /#############((     \\//     ))#############\
- *              -###############\\    (oo)    //###############-
- *             -#################\\  / VV \  //#################-
- *            -###################\\/      \//###################-
- *           _#/|##########/\######(   /\   )######/\##########|\#_
- *           |/ |#/\#/\#/\/  \#/\##\  |  |  /##/\#/  \/\#/\#/\#| \|
- *           `  |/  V  V  `   V  \#\| |  | |/#/  V   '  V  V  \|  '
- *              `   `  `      `   / | |  | | \   '      '  '   '
- *                               (  | |  | |  )
- *                              __\ | |  | | /__
- *                             (vvv(VVV)(VVV)vvv)
- *
- *                              HERE BE DRAGONS
- *
- */
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
 
 package com.github.shadowsocks
 
@@ -44,7 +25,6 @@ import android.content.{BroadcastReceiver, Context, Intent, IntentFilter}
 import android.net.VpnService
 import android.os.{Bundle, Handler}
 import android.util.Log
-import com.github.shadowsocks.utils.ConfigUtils
 import com.github.shadowsocks.ShadowsocksApplication.app
 
 object ShadowsocksRunnerActivity {
@@ -66,7 +46,7 @@ class ShadowsocksRunnerActivity extends Activity with ServiceBoundContext {
 
   def startBackgroundService() {
     if (app.isNatEnabled) {
-      bgService.use(ConfigUtils.loadFromSharedPreferences)
+      bgService.use(app.profileId)
       finish()
     } else {
       val intent = VpnService.prepare(ShadowsocksRunnerActivity.this)
@@ -84,7 +64,7 @@ class ShadowsocksRunnerActivity extends Activity with ServiceBoundContext {
     val locked = km.inKeyguardRestrictedInputMode
     if (locked) {
       val filter = new IntentFilter(Intent.ACTION_USER_PRESENT)
-      receiver = (context: Context, intent: Intent) => {
+      receiver = (_: Context, intent: Intent) => {
         if (intent.getAction == Intent.ACTION_USER_PRESENT) {
           attachService()
         }
@@ -93,7 +73,7 @@ class ShadowsocksRunnerActivity extends Activity with ServiceBoundContext {
     } else {
       attachService()
     }
-    finish
+    finish()
   }
 
   override def onDestroy() {
@@ -109,7 +89,7 @@ class ShadowsocksRunnerActivity extends Activity with ServiceBoundContext {
     resultCode match {
       case Activity.RESULT_OK =>
         if (bgService != null) {
-          bgService.use(ConfigUtils.loadFromSharedPreferences)
+          bgService.use(app.profileId)
         }
       case _ =>
         Log.e(TAG, "Failed to start VpnService")

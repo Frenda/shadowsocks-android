@@ -1,52 +1,35 @@
-/*
- * Shadowsocks - A shadowsocks client for Android
- * Copyright (C) 2014 <max.c.lv@gmail.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- *
- *                            ___====-_  _-====___
- *                      _--^^^#####//      \\#####^^^--_
- *                   _-^##########// (    ) \\##########^-_
- *                  -############//  |\^^/|  \\############-
- *                _/############//   (@::@)   \\############\_
- *               /#############((     \\//     ))#############\
- *              -###############\\    (oo)    //###############-
- *             -#################\\  / VV \  //#################-
- *            -###################\\/      \//###################-
- *           _#/|##########/\######(   /\   )######/\##########|\#_
- *           |/ |#/\#/\#/\/  \#/\##\  |  |  /##/\#/  \/\#/\#/\#| \|
- *           `  |/  V  V  `   V  \#\| |  | |/#/  V   '  V  V  \|  '
- *              `   `  `      `   / | |  | | \   '      '  '   '
- *                               (  | |  | |  )
- *                              __\ | |  | | /__
- *                             (vvv(VVV)(VVV)vvv)
- *
- *                              HERE BE DRAGONS
- *
- */
+/*******************************************************************************/
+/*                                                                             */
+/*  Copyright (C) 2016 by Max Lv <max.c.lv@gmail.com>                          */
+/*  Copyright (C) 2016 by Mygod Studio <contact-shadowsocks-android@mygod.be>  */
+/*                                                                             */
+/*  This program is free software: you can redistribute it and/or modify       */
+/*  it under the terms of the GNU General Public License as published by       */
+/*  the Free Software Foundation, either version 3 of the License, or          */
+/*  (at your option) any later version.                                        */
+/*                                                                             */
+/*  This program is distributed in the hope that it will be useful,            */
+/*  but WITHOUT ANY WARRANTY; without even the implied warranty of             */
+/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              */
+/*  GNU General Public License for more details.                               */
+/*                                                                             */
+/*  You should have received a copy of the GNU General Public License          */
+/*  along with this program. If not, see <http://www.gnu.org/licenses/>.       */
+/*                                                                             */
+/*******************************************************************************/
+
 package com.github.shadowsocks.utils
 
+import java.io.File
 import java.net._
 import java.security.MessageDigest
+import java.util.{Scanner, StringTokenizer}
 
 import android.animation.{Animator, AnimatorListenerAdapter}
 import android.content.pm.PackageManager
 import android.content.{Context, Intent}
 import android.graphics._
 import android.os.Build
-import android.provider.Settings
 import android.util.{Base64, DisplayMetrics, Log}
 import android.view.View.MeasureSpec
 import android.view.{Gravity, View, Window}
@@ -55,24 +38,14 @@ import com.github.shadowsocks.ShadowsocksApplication.app
 import com.github.shadowsocks.{BuildConfig, ShadowsocksRunnerService}
 import org.xbill.DNS._
 
+import scala.collection.JavaConversions._
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.{Failure, Try}
 
 object Utils {
   private val TAG = "Shadowsocks"
-
-  /**
-    * Check the system's iptables
-    * Default to use the app's iptables
-    */
-  private val DEFAULT_IPTABLES = "/system/bin/iptables"
-  private val ALTERNATIVE_IPTABLES = "iptables"
-  lazy val iptables = if (Console.isRoot) {
-    val lines = Console.runRootCommand(DEFAULT_IPTABLES + " --version", DEFAULT_IPTABLES + " -L -t nat -n")
-    if (Console.isRoot && lines != null && !lines.contains("OUTPUT") || !lines.contains("v1.4.")) ALTERNATIVE_IPTABLES
-    else DEFAULT_IPTABLES
-  } else DEFAULT_IPTABLES
 
   def isLollipopOrAbove: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
 
@@ -85,8 +58,7 @@ object Utils {
     new String(Base64.encode(mdg.digest, 0))
   }
 
-  def dpToPx(context: Context, dp: Int): Int =
-    Math.round(dp * (context.getResources.getDisplayMetrics.xdpi / DisplayMetrics.DENSITY_DEFAULT))
+  def dpToPx(context: Context, dp: Int): Int = Math.round(dp * context.getResources.getDisplayMetrics.density)
 
   /*
      * round or floor depending on whether you are using offsets(floor) or
@@ -94,7 +66,7 @@ object Utils {
      */
 
   // Based on: http://stackoverflow.com/a/21026866/2245107
-  def positionToast(toast: Toast, view: View, window: Window, offsetX: Int = 0, offsetY: Int = 0) = {
+  def positionToast(toast: Toast, view: View, window: Window, offsetX: Int = 0, offsetY: Int = 0): Toast = {
     val rect = new Rect
     window.getDecorView.getWindowVisibleDisplayFrame(rect)
     val viewLocation = new Array[Int](2)
@@ -116,34 +88,66 @@ object Utils {
     to.setVisibility(View.VISIBLE)
     to.animate().alpha(1).setDuration(shortAnimTime)
     from.animate().alpha(0).setDuration(shortAnimTime).setListener(new AnimatorListenerAdapter {
-      override def onAnimationEnd(animation: Animator) = from.setVisibility(View.GONE)
+      override def onAnimationEnd(animation: Animator): Unit = from.setVisibility(View.GONE)
     })
   }
 
-  // Blocked > 3 seconds
-  def toggleAirplaneMode(context: Context) = {
-    if (Console.isRoot) {
-      Console.runRootCommand("ndc resolver flushdefaultif", "ndc resolver flushif wlan0")
-      true
-    } else if (Build.VERSION.SDK_INT < 17) {
-      toggleBelowApiLevel17(context)
-      true
-    } else false
+  def readAllLines(f: File): String = {
+    val scanner = new Scanner(f)
+    try {
+      scanner.useDelimiter("\\Z")
+      scanner.next()
+    } finally scanner.close()
+  }
+  def printToFile(f: java.io.File)(op: java.io.PrintWriter => Unit) {
+    val p = new java.io.PrintWriter(f)
+    try {
+      op(p)
+    } finally {
+      p.close()
+    }
   }
 
-  //noinspection ScalaDeprecation
-  private def toggleBelowApiLevel17(context: Context) {
-    // Android 4.2 below
-    Settings.System.putInt(context.getContentResolver, Settings.System.AIRPLANE_MODE_ON, 1)
-    val enableIntent = new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED)
-    enableIntent.putExtra("state", true)
-    context.sendBroadcast(enableIntent)
-    Thread.sleep(3000)
-
-    Settings.System.putInt(context.getContentResolver, Settings.System.AIRPLANE_MODE_ON, 0)
-    val disableIntent = new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED)
-    disableIntent.putExtra("state", false)
-    context.sendBroadcast(disableIntent)
+  /**
+    * Crack a command line.
+    * Based on: https://github.com/apache/ant/blob/588ce1f/src/main/org/apache/tools/ant/types/Commandline.java#L471
+    * @param toProcess the command line to process.
+    * @return the command line broken into strings.
+    * An empty or null toProcess parameter results in a zero sized ArrayBuffer.
+    */
+  def translateCommandline(toProcess: String): ArrayBuffer[String] = {
+    if (toProcess == null || toProcess.length == 0) return ArrayBuffer[String]()
+    val tok = new StringTokenizer(toProcess, "\"' ", true)
+    val result = ArrayBuffer[String]()
+    val current = new StringBuilder()
+    var quote = ' '
+    var last = " "
+    while (tok.hasMoreTokens) {
+      val nextTok = tok.nextToken
+      quote match {
+        case '\'' => nextTok match {
+          case "'" => quote = ' '
+          case _ => current.append(nextTok)
+        }
+        case '"' => nextTok match {
+          case "\"" => quote = ' '
+          case _ => current.append(nextTok)
+        }
+        case _ => nextTok match {
+          case "'" => quote = '\''
+          case "\"" => quote = '"'
+          case " " => if (last != " ") {
+            result.append(current.toString)
+            current.setLength(0)
+          }
+          case _ => current.append(nextTok)
+        }
+      }
+      last = nextTok
+    }
+    if (current.nonEmpty) result.append(current.toString)
+    if (quote == '\'' || quote == '"') throw new Exception("Unbalanced quotes in " + toProcess)
+    result
   }
 
   def resolve(host: String, addrType: Int): Option[String] = {
@@ -164,40 +168,18 @@ object Utils {
         }
       }
     } catch {
-      case e: Exception =>
+      case _: Exception =>
     }
     None
   }
 
-  def resolve(host: String): Option[String] = {
-    try {
-      val addr = InetAddress.getByName(host)
-      Some(addr.getHostAddress)
-    } catch {
-      case e: UnknownHostException => None
-    }
+  def resolve(host: String): Option[String] = try Some(InetAddress.getByName(host).getHostAddress) catch {
+    case _: UnknownHostException => None
   }
 
-  def resolve(host: String, enableIPv6: Boolean): Option[String] = {
-    if (enableIPv6 && Utils.isIPv6Support) {
-      resolve(host, Type.AAAA) match {
-        case Some(addr) =>
-          return Some(addr)
-        case None =>
-      }
-    }
-    resolve(host, Type.A) match {
-      case Some(addr) =>
-        return Some(addr)
-      case None =>
-    }
-    resolve(host) match {
-      case Some(addr) =>
-        return Some(addr)
-      case None =>
-    }
-    None
-  }
+  def resolve(host: String, enableIPv6: Boolean): Option[String] =
+    (if (enableIPv6 && Utils.isIPv6Support) resolve(host, Type.AAAA) else None).orElse(resolve(host, Type.A))
+      .orElse(resolve(host))
 
   private lazy val isNumericMethod = classOf[InetAddress].getMethod("isNumeric", classOf[String])
   def isNumeric(address: String): Boolean = isNumericMethod.invoke(null, address).asInstanceOf[Boolean]
@@ -207,31 +189,21 @@ object Utils {
    */
   def isIPv6Support: Boolean = {
     try {
-      val interfaces = NetworkInterface.getNetworkInterfaces
-      while (interfaces.hasMoreElements) {
-        val intf = interfaces.nextElement()
-        val addrs = intf.getInetAddresses
-        while (addrs.hasMoreElements) {
-          val addr = addrs.nextElement()
-          if (!addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-            if (addr.isInstanceOf[Inet6Address]) {
-              if (BuildConfig.DEBUG) Log.d(TAG, "IPv6 address detected")
-              return true
-            }
+      for (intf <- enumerationAsScalaIterator(NetworkInterface.getNetworkInterfaces))
+        for (addr <- enumerationAsScalaIterator(intf.getInetAddresses))
+          if (addr.isInstanceOf[Inet6Address] && !addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "IPv6 address detected")
+            return true
           }
-        }
-      }
     } catch {
       case ex: Exception =>
         Log.e(TAG, "Failed to get interfaces' addresses.", ex)
+        app.track(ex)
     }
     false
   }
 
   def startSsService(context: Context) {
-    val isInstalled: Boolean = app.settings.getBoolean(app.getVersionName, false)
-    if (!isInstalled) return
-
     val intent = new Intent(context, classOf[ShadowsocksRunnerService])
     context.startService(intent)
   }
@@ -242,9 +214,11 @@ object Utils {
   }
 
   private val handleFailure: Try[_] => Unit = {
-    case Failure(e) => e.printStackTrace()
+    case Failure(e) =>
+      e.printStackTrace()
+      app.track(e)
     case _ =>
   }
 
-  def ThrowableFuture[T](f: => T) = Future(f) onComplete handleFailure
+  def ThrowableFuture[T](f: => T): Unit = Future(f) onComplete handleFailure
 }
