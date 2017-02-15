@@ -1,4 +1,4 @@
-Please read FAQ in wiki then answer these questions before submitting your issue. Thanks!
+Please read FAQ then answer these questions before submitting your issue. Thanks!
 
 ### Environment
 
@@ -25,11 +25,12 @@ _Put an `x` inside the [ ] that applies._
   * [ ] Bypass LAN & China
   * [ ] GFW List
   * [ ] China List
+  * [ ] Custom rules
 * [ ] IPv6 route
 * [ ] Per-App Proxy
   * [ ] Bypass mode
 * [ ] UDP Forwarding
-* KCP Parameters: (leave blank if not enabled)
+* Plugin configuration (if applicable):
 * [ ] Auto Connect
 * [ ] TCP Fast Open
 * [ ] NAT mode
