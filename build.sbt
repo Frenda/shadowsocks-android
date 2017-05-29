@@ -10,6 +10,7 @@ lazy val commonSettings = Seq(
   javacOptions ++= "-source" :: "1.7" :: "-target" :: "1.7" :: Nil,
   scalacOptions ++= "-target:jvm-1.7" :: "-Xexperimental" :: Nil,
   ndkArgs := "-j" :: java.lang.Runtime.getRuntime.availableProcessors.toString :: Nil,
+  ndkAbiFilter := Seq("armeabi-v7a", "arm64-v8a", "x86"),
 
   proguardVersion := "5.3.3",
   proguardCache := Seq(),
@@ -20,7 +21,7 @@ lazy val commonSettings = Seq(
   resConfigs := Seq("ja", "ko", "ru", "zh-rCN", "zh-rTW")
 )
 
-val supportLibsVersion = "25.2.0"
+val supportLibsVersion = "25.3.1"
 lazy val root = Project(id = "shadowsocks-android", base = file("."))
   .settings(commonSettings)
   .aggregate(plugin, mobile)
