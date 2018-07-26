@@ -18,10 +18,23 @@
  *                                                                             *
  *******************************************************************************/
 
-package android.support.design.animation
+package com.github.shadowsocks.utils
 
-import android.animation.TimeInterpolator
+import android.annotation.SuppressLint
+import android.annotation.TargetApi
+import android.app.Application
+import android.content.Context
 
-object AnimationConsts {
-    val FAST_OUT_SLOW_IN_INTERPOLATOR: TimeInterpolator get() = AnimationUtils.FAST_OUT_SLOW_IN_INTERPOLATOR
+@SuppressLint("Registered")
+@TargetApi(24)
+class DeviceStorageApp(context: Context) : Application() {
+    init {
+        attachBaseContext(context.createDeviceProtectedStorageContext())
+    }
+
+    /**
+     * Thou shalt not get the REAL underlying application context which would no longer be operating under device
+     * protected storage.
+     */
+    override fun getApplicationContext(): Context = this
 }

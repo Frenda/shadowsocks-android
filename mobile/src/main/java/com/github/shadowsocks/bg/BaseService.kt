@@ -28,13 +28,15 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
 import android.os.RemoteCallbackList
-import android.support.v4.os.UserManagerCompat
 import android.util.Base64
 import android.util.Log
+import androidx.core.os.UserManagerCompat
+import androidx.core.os.bundleOf
+import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.R
 import com.github.shadowsocks.acl.Acl
-import com.github.shadowsocks.acl.AclSyncJob
+import com.github.shadowsocks.acl.AclSyncer
 import com.github.shadowsocks.aidl.IShadowsocksService
 import com.github.shadowsocks.aidl.IShadowsocksServiceCallback
 import com.github.shadowsocks.database.Profile
@@ -44,17 +46,18 @@ import com.github.shadowsocks.plugin.PluginManager
 import com.github.shadowsocks.plugin.PluginOptions
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.*
+import com.google.firebase.analytics.FirebaseAnalytics
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
-import java.net.*
+import java.net.InetAddress
+import java.net.UnknownHostException
 import java.security.MessageDigest
 import java.util.*
 import java.util.concurrent.TimeUnit
-import kotlin.reflect.KClass
 
 /**
  * This object uses WeakMap to simulate the effects of multi-inheritance.
@@ -119,8 +122,7 @@ object BaseService {
                                             if (bandwidthListeners.contains(item.asBinder()))
                                                 item.trafficUpdated(profile.id, txRate, rxRate, txTotal, rxTotal)
                                         } catch (e: Exception) {
-                                            e.printStackTrace()
-                                            app.track(e)
+                                            printLog(e)
                                         }
                                         callbacks.finishBroadcast()
                                     }
@@ -164,8 +166,7 @@ object BaseService {
                                 val item = callbacks.getBroadcastItem(i)
                                 if (bandwidthListeners.contains(item.asBinder())) item.trafficPersisted(profile.id)
                             } catch (e: Exception) {
-                                e.printStackTrace()
-                                app.track(e)
+                                printLog(e)
                             }
                         }
                         callbacks.finishBroadcast()
@@ -200,7 +201,7 @@ object BaseService {
             }
             // sensitive Shadowsocks config is stored in
             val file = File(if (UserManagerCompat.isUserUnlocked(app)) app.filesDir else @TargetApi(24) {
-                app.deviceContext.noBackupFilesDir  // only API 24+ will be in locked state
+                app.deviceStorage.noBackupFilesDir  // only API 24+ will be in locked state
             }, CONFIG_FILE)
             shadowsocksConfigFile = file
             file.writeText(config.toString())
@@ -219,8 +220,7 @@ object BaseService {
                 for (i in 0 until n) try {
                     callbacks.getBroadcastItem(i).stateChanged(s, binder.profileName, msg)
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                    app.track(e)
+                    printLog(e)
                 }
                 callbacks.finishBroadcast()
             }
@@ -248,7 +248,7 @@ object BaseService {
                     stopRunner(false)
                     startRunner()
                 }
-                else -> Log.w(tag, "Illegal state when invoking use: $s")
+                else -> Crashlytics.log(Log.WARN, tag, "Illegal state when invoking use: $s")
             }
         }
 
@@ -293,7 +293,7 @@ object BaseService {
             val data = data
             data.changeState(STOPPING)
 
-            app.track(tag, "stop")
+            app.analytics.logEvent("stop", bundleOf(Pair(FirebaseAnalytics.Param.METHOD, tag)))
 
             killProcesses()
 
@@ -357,7 +357,7 @@ object BaseService {
             }
 
             data.notification = createNotification(profile.formattedName)
-            app.track(tag, "start")
+            app.analytics.logEvent("start", bundleOf(Pair(FirebaseAnalytics.Param.METHOD, tag)))
 
             data.changeState(CONNECTING)
 
@@ -398,22 +398,16 @@ object BaseService {
                     // Clean up
                     killProcesses()
 
-                    if (!profile.host.isNumericAddress())
-                    {
-                        val resolveThread = thread() {
-                            profile.host = InetAddress.getByName(profile.host).hostAddress ?: throw UnknownHostException()
-                        }
-                        resolveThread.join(10 * 1000)
-                    }
-
-                    if (!profile.host.isNumericAddress())
-                    {
-                        throw UnknownHostException()
+                    if (!profile.host.isNumericAddress()) {
+                        thread("BaseService-resolve") {
+                            profile.host = InetAddress.getByName(profile.host).hostAddress ?: ""
+                        }.join(10 * 1000)
+                        if (!profile.host.isNumericAddress()) throw UnknownHostException()
                     }
 
                     startNativeProcesses()
 
-                    if (profile.route !in arrayOf(Acl.ALL, Acl.CUSTOM_RULES)) AclSyncJob.schedule(profile.route)
+                    if (profile.route !in arrayOf(Acl.ALL, Acl.CUSTOM_RULES)) AclSyncer.schedule(profile.route)
 
                     data.changeState(CONNECTED)
                 } catch (_: UnknownHostException) {
@@ -421,8 +415,8 @@ object BaseService {
                 } catch (_: VpnService.NullConnectionException) {
                     stopRunner(true, getString(R.string.reboot_required))
                 } catch (exc: Throwable) {
+                    printLog(exc)
                     stopRunner(true, "${getString(R.string.service_failed)}: ${exc.message}")
-                    app.track(exc)
                 }
             }
             return Service.START_NOT_STICKY
@@ -433,7 +427,7 @@ object BaseService {
     internal fun register(instance: Interface) = instances.put(instance, Data(instance))
 
     val usingVpnMode: Boolean get() = DataStore.serviceMode == Key.modeVpn
-    val serviceClass: KClass<out Any> get() = when (DataStore.serviceMode) {
+    val serviceClass get() = when (DataStore.serviceMode) {
         Key.modeProxy -> ProxyService::class
         Key.modeVpn -> VpnService::class
         Key.modeTransproxy -> TransproxyService::class

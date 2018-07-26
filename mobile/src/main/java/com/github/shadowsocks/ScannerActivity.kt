@@ -27,19 +27,20 @@ import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.Bundle
-import android.support.v4.app.TaskStackBuilder
-import android.support.v7.app.AppCompatActivity
-import android.support.v7.widget.Toolbar
+import androidx.core.app.TaskStackBuilder
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
 import android.util.Log
 import android.util.SparseArray
 import android.view.MenuItem
 import android.widget.Toast
-import com.github.shadowsocks.App.Companion.app
+import androidx.core.content.getSystemService
+import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.utils.openBitmap
+import com.github.shadowsocks.utils.printLog
 import com.github.shadowsocks.utils.resolveResourceId
-import com.github.shadowsocks.utils.systemService
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.samples.vision.barcodereader.BarcodeCapture
 import com.google.android.gms.samples.vision.barcodereader.BarcodeGraphic
@@ -84,12 +85,12 @@ class ScannerActivity : AppCompatActivity(), Toolbar.OnMenuItemClickListener, Ba
             }
             return
         }
-        if (Build.VERSION.SDK_INT >= 25) getSystemService(ShortcutManager::class.java).reportShortcutUsed("scan")
+        if (Build.VERSION.SDK_INT >= 25) getSystemService<ShortcutManager>()!!.reportShortcutUsed("scan")
         if (try {
-                    systemService<CameraManager>().cameraIdList.isEmpty()
+                    getSystemService<CameraManager>()?.cameraIdList?.isEmpty()
                 } catch (_: CameraAccessException) {
                     true
-                }) {
+                } != false) {
             startImport()
             return
         }
@@ -111,9 +112,7 @@ class ScannerActivity : AppCompatActivity(), Toolbar.OnMenuItemClickListener, Ba
     }
     override fun onRetrievedMultiple(closetToClick: Barcode?, barcode: MutableList<BarcodeGraphic>?) = check(false)
     override fun onBitmapScanned(sparseArray: SparseArray<Barcode>?) { }
-    override fun onRetrievedFailed(reason: String?) {
-        Log.w(TAG, reason)
-    }
+    override fun onRetrievedFailed(reason: String?) = Crashlytics.log(Log.WARN, TAG, reason)
     override fun onPermissionRequestDenied() {
         Toast.makeText(this, R.string.add_profile_scanner_permission_required, Toast.LENGTH_SHORT).show()
         startImport()
@@ -146,7 +145,7 @@ class ScannerActivity : AppCompatActivity(), Toolbar.OnMenuItemClickListener, Ba
                         success = true
                     }
                 } catch (e: Exception) {
-                    app.track(e)
+                    printLog(e)
                 }
                 Toast.makeText(this, if (success) R.string.action_import_msg else R.string.action_import_err,
                         Toast.LENGTH_SHORT).show()

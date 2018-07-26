@@ -22,28 +22,32 @@ package com.github.shadowsocks
 
 import android.app.Activity
 import android.app.PendingIntent
+import android.app.UiModeManager
 import android.app.backup.BackupManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.net.VpnService
 import android.nfc.NdefMessage
 import android.nfc.NfcAdapter
 import android.os.Bundle
 import android.os.SystemClock
-import android.support.customtabs.CustomTabsIntent
-import android.support.design.widget.Snackbar
-import android.support.v4.content.ContextCompat
-import android.support.v7.app.AlertDialog
-import android.support.v7.app.AppCompatActivity
-import android.support.v7.app.AppCompatDelegate
-import android.support.v7.content.res.AppCompatResources
-import android.support.v7.preference.PreferenceDataStore
 import android.text.format.Formatter
 import android.util.Log
+import android.view.Gravity
+import android.view.MenuItem
 import android.view.View
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.core.content.ContextCompat
+import androidx.core.content.getSystemService
+import androidx.core.net.toUri
+import androidx.drawerlayout.widget.DrawerLayout
+import androidx.preference.PreferenceDataStore
+import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.acl.Acl
 import com.github.shadowsocks.acl.CustomRulesFragment
@@ -59,10 +63,8 @@ import com.github.shadowsocks.utils.Key
 import com.github.shadowsocks.utils.responseLength
 import com.github.shadowsocks.utils.thread
 import com.github.shadowsocks.widget.ServiceButton
-import com.mikepenz.materialdrawer.Drawer
-import com.mikepenz.materialdrawer.DrawerBuilder
-import com.mikepenz.materialdrawer.model.PrimaryDrawerItem
-import com.mikepenz.materialdrawer.model.interfaces.IDrawerItem
+import com.google.android.material.navigation.NavigationView
+import com.google.android.material.snackbar.Snackbar
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -70,17 +72,11 @@ import java.net.Proxy
 import java.net.URL
 import java.util.*
 
-class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawer.OnDrawerItemClickListener,
-        OnPreferenceDataStoreChangeListener {
+class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, OnPreferenceDataStoreChangeListener,
+        NavigationView.OnNavigationItemSelectedListener {
     companion object {
         private const val TAG = "ShadowsocksMainActivity"
         private const val REQUEST_CONNECT = 1
-
-        private const val DRAWER_PROFILES = 0L
-        private const val DRAWER_GLOBAL_SETTINGS = 1L
-        private const val DRAWER_ABOUT = 3L
-        private const val DRAWER_FAQ = 4L
-        private const val DRAWER_CUSTOM_RULES = 5L
 
         fun pendingIntent(context: Context) = PendingIntent.getActivity(context, 0,
                 Intent(context, MainActivity::class.java).setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), 0)
@@ -90,8 +86,8 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
 
     // UI
     private lateinit var fab: ServiceButton
-    internal lateinit var drawer: Drawer
-    private var previousSelectedDrawer: Long = 0    // it's actually lateinit
+    internal lateinit var drawer: DrawerLayout
+    private lateinit var navigation: NavigationView
 
     private var testCount = 0
     private lateinit var statusText: TextView
@@ -105,10 +101,9 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
                 .setToolbarColor(ContextCompat.getColor(this, R.color.color_primary))
                 .build()
     }
-    fun launchUrl(uri: Uri) = try {
-        customTabsIntent.launchUrl(this, uri)
+    fun launchUrl(uri: String) = try {
+        customTabsIntent.launchUrl(this, uri.toUri())
     } catch (_: ActivityNotFoundException) { }  // ignore
-    fun launchUrl(uri: String) = launchUrl(Uri.parse(uri))
 
     // service
     var state = BaseService.IDLE
@@ -136,7 +131,6 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
                 if (msg != null) {
                     Snackbar.make(findViewById(R.id.snackbar),
                             getString(R.string.vpn_error).format(Locale.ENGLISH, msg), Snackbar.LENGTH_LONG).show()
-                    Log.e(TAG, "Error to start VPN service: $msg")
                 }
                 statusText.setText(R.string.not_connected)
             }
@@ -209,54 +203,21 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (resultCode == Activity.RESULT_OK) app.startService() else {
             Snackbar.make(findViewById(R.id.snackbar), R.string.vpn_permission_denied, Snackbar.LENGTH_LONG).show()
-            Log.e(TAG, "Failed to start VpnService: $data")
+            Crashlytics.log(Log.ERROR, TAG, "Failed to start VpnService from onActivityResult: $data")
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.layout_main)
-        drawer = DrawerBuilder()
-                .withActivity(this)
-                .withTranslucentStatusBar(true)
-                .withHeader(R.layout.layout_header)
-                .addDrawerItems(
-                        PrimaryDrawerItem()
-                                .withIdentifier(DRAWER_PROFILES)
-                                .withName(R.string.profiles)
-                                .withIcon(AppCompatResources.getDrawable(this, R.drawable.ic_action_description))
-                                .withIconTintingEnabled(true),
-                        PrimaryDrawerItem()
-                                .withIdentifier(DRAWER_CUSTOM_RULES)
-                                .withName(R.string.custom_rules)
-                                .withIcon(AppCompatResources.getDrawable(this, R.drawable.ic_action_assignment))
-                                .withIconTintingEnabled(true),
-                        PrimaryDrawerItem()
-                                .withIdentifier(DRAWER_GLOBAL_SETTINGS)
-                                .withName(R.string.settings)
-                                .withIcon(AppCompatResources.getDrawable(this, R.drawable.ic_action_settings))
-                                .withIconTintingEnabled(true)
-                )
-                .addStickyDrawerItems(
-                        PrimaryDrawerItem()
-                                .withIdentifier(DRAWER_FAQ)
-                                .withName(R.string.faq)
-                                .withIcon(AppCompatResources.getDrawable(this, R.drawable.ic_action_help_outline))
-                                .withIconTintingEnabled(true)
-                                .withSelectable(false),
-                        PrimaryDrawerItem()
-                                .withIdentifier(DRAWER_ABOUT)
-                                .withName(R.string.about)
-                                .withIcon(AppCompatResources.getDrawable(this, R.drawable.ic_action_copyright))
-                                .withIconTintingEnabled(true)
-                )
-                .withOnDrawerItemClickListener(this)
-                .withActionBarDrawerToggle(true)
-                .withSavedInstance(savedInstanceState)
-                .build()
+        drawer = findViewById(R.id.drawer)
+        navigation = findViewById(R.id.navigation)
+        navigation.setNavigationItemSelectedListener(this)
+        if (savedInstanceState == null) {
+            navigation.menu.findItem(R.id.profiles).isChecked = true
+            displayFragment(ProfilesFragment())
+        }
 
-        if (savedInstanceState == null) displayFragment(ProfilesFragment())
-        previousSelectedDrawer = drawer.currentSelection
         statusText = findViewById(R.id.status)
         txText = findViewById(R.id.tx)
         txRateText = findViewById(R.id.txRate)
@@ -290,6 +251,11 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
 
         val intent = this.intent
         if (intent != null) handleShareIntent(intent)
+        if (savedInstanceState != null
+                && DataStore.nightMode == AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+                && AppCompatDelegate.getDefaultNightMode() != AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM) {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -314,7 +280,7 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
         }
         AlertDialog.Builder(this)
                 .setTitle(R.string.add_profile_dialog)
-                .setPositiveButton(R.string.yes, { _, _ -> profiles.forEach { ProfileManager.createProfile(it) } })
+                .setPositiveButton(R.string.yes) { _, _ -> profiles.forEach { ProfileManager.createProfile(it) } }
                 .setNegativeButton(R.string.no, null)
                 .setMessage(profiles.joinToString("\n"))
                 .create()
@@ -328,7 +294,12 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
                 connection.connect()
             }
             Key.nightMode -> {
-                AppCompatDelegate.setDefaultNightMode(DataStore.nightMode)
+                val mode = DataStore.nightMode
+                AppCompatDelegate.setDefaultNightMode(when (mode) {
+                    AppCompatDelegate.getDefaultNightMode() -> return
+                    AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM -> getSystemService<UiModeManager>()!!.nightMode
+                    else -> mode
+                })
                 recreate()
             }
         }
@@ -336,24 +307,26 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
 
     private fun displayFragment(fragment: ToolbarFragment) {
         supportFragmentManager.beginTransaction().replace(R.id.fragment_holder, fragment).commitAllowingStateLoss()
-        drawer.closeDrawer()
+        drawer.closeDrawers()
     }
 
-    override fun onItemClick(view: View?, position: Int, drawerItem: IDrawerItem<*, *>): Boolean {
-        val id = drawerItem.identifier
-        if (id == previousSelectedDrawer) drawer.closeDrawer() else {
-            previousSelectedDrawer = id
-            when (id) {
-                DRAWER_PROFILES -> displayFragment(ProfilesFragment())
-                DRAWER_GLOBAL_SETTINGS -> displayFragment(GlobalSettingsFragment())
-                DRAWER_ABOUT -> {
-                    app.track(TAG, "about")
+    override fun onNavigationItemSelected(item: MenuItem): Boolean {
+        if (item.isChecked) drawer.closeDrawers() else {
+            when (item.itemId) {
+                R.id.profiles -> displayFragment(ProfilesFragment())
+                R.id.globalSettings -> displayFragment(GlobalSettingsFragment())
+                R.id.about -> {
+                    app.analytics.logEvent("about", Bundle())
                     displayFragment(AboutFragment())
                 }
-                DRAWER_FAQ -> launchUrl(getString(R.string.faq_url))
-                DRAWER_CUSTOM_RULES -> displayFragment(CustomRulesFragment())
+                R.id.faq -> {
+                    launchUrl(getString(R.string.faq_url))
+                    return true
+                }
+                R.id.customRules -> displayFragment(CustomRulesFragment())
                 else -> return false
             }
+            item.isChecked = true
         }
         return true
     }
@@ -369,22 +342,20 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Interface, Drawe
     }
 
     override fun onBackPressed() {
-        if (drawer.isDrawerOpen) drawer.closeDrawer() else {
+        if (drawer.isDrawerOpen(Gravity.START)) drawer.closeDrawers() else {
             val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_holder) as ToolbarFragment
-            if (!currentFragment.onBackPressed())
-                if (currentFragment is ProfilesFragment) super.onBackPressed()
-                else drawer.setSelection(DRAWER_PROFILES)
+            if (!currentFragment.onBackPressed()) {
+                if (currentFragment is ProfilesFragment) super.onBackPressed() else {
+                    navigation.menu.findItem(R.id.profiles).isChecked = true
+                    displayFragment(ProfilesFragment())
+                }
+            }
         }
     }
 
     override fun onStop() {
         connection.listeningForBandwidth = false
         super.onStop()
-    }
-
-    override fun onSaveInstanceState(outState: Bundle?) {
-        super.onSaveInstanceState(outState)
-        drawer.saveInstanceState(outState)
     }
 
     override fun onDestroy() {

@@ -18,7 +18,7 @@
  *                                                                             *
  *******************************************************************************/
 
-package android.support.design.widget
+package com.google.android.material.snackbar
 
 object SnackbarConsts {
     const val ANIMATION_DURATION = BaseTransientBottomBar.ANIMATION_DURATION.toLong()

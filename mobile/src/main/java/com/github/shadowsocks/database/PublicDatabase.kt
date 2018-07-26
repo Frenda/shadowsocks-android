@@ -20,9 +20,9 @@
 
 package com.github.shadowsocks.database
 
-import android.arch.persistence.room.Database
-import android.arch.persistence.room.Room
-import android.arch.persistence.room.RoomDatabase
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.database.migration.RecreateSchemaMigration
 import com.github.shadowsocks.utils.Key
@@ -31,7 +31,7 @@ import com.github.shadowsocks.utils.Key
 abstract class PublicDatabase : RoomDatabase() {
     companion object {
         private val instance by lazy {
-            Room.databaseBuilder(app.deviceContext, PublicDatabase::class.java, Key.DB_PUBLIC)
+            Room.databaseBuilder(app.deviceStorage, PublicDatabase::class.java, Key.DB_PUBLIC)
                     .allowMainThreadQueries()
                     .addMigrations(
                             Migration3
