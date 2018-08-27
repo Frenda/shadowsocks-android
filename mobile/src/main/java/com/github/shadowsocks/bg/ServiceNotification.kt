@@ -29,15 +29,15 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.PowerManager
+import android.text.format.Formatter
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import android.text.format.Formatter
+import androidx.core.content.getSystemService
 import com.github.shadowsocks.MainActivity
 import com.github.shadowsocks.R
 import com.github.shadowsocks.aidl.IShadowsocksServiceCallback
 import com.github.shadowsocks.utils.Action
 import com.github.shadowsocks.utils.broadcastReceiver
-import androidx.core.content.getSystemService
 import java.util.*
 
 /**
@@ -91,7 +91,7 @@ class ServiceNotification(private val service: BaseService.Interface, profileNam
         service.registerReceiver(lockReceiver, screenFilter)
     }
 
-    private fun update(action: String, forceShow: Boolean = false) {
+    private fun update(action: String?, forceShow: Boolean = false) {
         if (forceShow || service.data.state == BaseService.CONNECTED) when (action) {
             Intent.ACTION_SCREEN_OFF -> {
                 setVisible(false, forceShow)

@@ -26,8 +26,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.*
 import android.os.Build
-import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import androidx.core.content.getSystemService
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.JniHelper
 import com.github.shadowsocks.MainActivity
@@ -38,7 +38,6 @@ import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.Subnet
 import com.github.shadowsocks.utils.parseNumericAddress
 import com.github.shadowsocks.utils.printLog
-import androidx.core.content.getSystemService
 import java.io.File
 import java.io.FileDescriptor
 import java.io.IOException
@@ -52,6 +51,9 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
         private const val PRIVATE_VLAN = "172.19.0.%s"
         private const val PRIVATE_VLAN6 = "fdfe:dcba:9876::%s"
 
+        /**
+         * https://android.googlesource.com/platform/prebuilts/runtime/+/94fec32/appcompat/hiddenapi-light-greylist.txt#9466
+         */
         private val getInt: Method = FileDescriptor::class.java.getDeclaredMethod("getInt$")
 
         /**
@@ -127,7 +129,7 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
     }
     private var listeningForDefaultNetwork = false
 
-    override fun onBind(intent: Intent): IBinder? = when (intent.action) {
+    override fun onBind(intent: Intent) = when (intent.action) {
         SERVICE_INTERFACE -> super<BaseVpnService>.onBind(intent)
         else -> super<LocalDnsService.Interface>.onBind(intent)
     }

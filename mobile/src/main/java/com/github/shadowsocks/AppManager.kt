@@ -33,24 +33,25 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.Handler
-import com.google.android.material.snackbar.Snackbar
-import androidx.core.app.TaskStackBuilder
-import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.DefaultItemAnimator
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import androidx.appcompat.widget.Toolbar
 import android.view.*
 import android.widget.ImageView
 import android.widget.Switch
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
 import androidx.core.content.getSystemService
+import androidx.recyclerview.widget.DefaultItemAnimator
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.preference.DataStore
-import com.github.shadowsocks.utils.*
+import com.github.shadowsocks.utils.DirectBoot
+import com.github.shadowsocks.utils.Key
+import com.github.shadowsocks.utils.thread
+import com.google.android.material.snackbar.Snackbar
 import java.util.concurrent.atomic.AtomicBoolean
 
-class AppManager : AppCompatActivity(), Toolbar.OnMenuItemClickListener {
+class AppManager : AppCompatActivity() {
     companion object {
         @SuppressLint("StaticFieldLeak")
         private var instance: AppManager? = null
@@ -170,15 +171,8 @@ class AppManager : AppCompatActivity(), Toolbar.OnMenuItemClickListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.layout_apps)
         toolbar = findViewById(R.id.toolbar)
-        toolbar.setTitle(R.string.proxied_apps)
-        toolbar.setNavigationIcon(theme.resolveResourceId(R.attr.homeAsUpIndicator))
-        toolbar.setNavigationOnClickListener {
-            val intent = parentActivityIntent
-            if (shouldUpRecreateTask(intent) || isTaskRoot)
-                TaskStackBuilder.create(this).addNextIntentWithParentStack(intent).startActivities() else finish()
-        }
-        toolbar.inflateMenu(R.menu.app_manager_menu)
-        toolbar.setOnMenuItemClickListener(this)
+        setSupportActionBar(toolbar)
+        supportActionBar!!.setDisplayHomeAsUpEnabled(true)
 
         if (!DataStore.proxyApps) {
             DataStore.proxyApps = true
@@ -208,8 +202,12 @@ class AppManager : AppCompatActivity(), Toolbar.OnMenuItemClickListener {
         loadAppsAsync()
     }
 
-    override fun onMenuItemClick(item: MenuItem): Boolean {
-        when (item.itemId) {
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        menuInflater.inflate(R.menu.app_manager_menu, menu)
+        return true
+    }
+    override fun onOptionsItemSelected(item: MenuItem?): Boolean {
+        when (item?.itemId) {
             R.id.action_apply_all -> {
                 val profiles = ProfileManager.getAllProfiles()
                 if (profiles != null) {
@@ -223,13 +221,13 @@ class AppManager : AppCompatActivity(), Toolbar.OnMenuItemClickListener {
                 } else Snackbar.make(appListView, R.string.action_export_err, Snackbar.LENGTH_LONG).show()
                 return true
             }
-            R.id.action_export -> {
+            R.id.action_export_clipboard -> {
                 clipboard.primaryClip = ClipData.newPlainText(Key.individual,
                         "${DataStore.bypass}\n${DataStore.individual}")
                 Snackbar.make(appListView, R.string.action_export_msg, Snackbar.LENGTH_LONG).show()
                 return true
             }
-            R.id.action_import -> {
+            R.id.action_import_clipboard -> {
                 val proxiedAppString = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
                 if (!proxiedAppString.isNullOrEmpty()) {
                     val i = proxiedAppString!!.indexOf('\n')

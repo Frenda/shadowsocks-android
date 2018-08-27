@@ -25,27 +25,29 @@ import android.content.ClipboardManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
-import com.google.android.material.snackbar.Snackbar
-import com.google.android.material.textfield.TextInputLayout
-import androidx.core.content.ContextCompat
-import androidx.appcompat.app.AlertDialog
-import androidx.recyclerview.widget.DefaultItemAnimator
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import androidx.appcompat.widget.Toolbar
-import androidx.recyclerview.widget.ItemTouchHelper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.*
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.widget.Toolbar
+import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
+import androidx.recyclerview.widget.DefaultItemAnimator
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.MainActivity
 import com.github.shadowsocks.R
 import com.github.shadowsocks.ToolbarFragment
 import com.github.shadowsocks.bg.BaseService
-import com.github.shadowsocks.utils.*
+import com.github.shadowsocks.utils.Subnet
+import com.github.shadowsocks.utils.asIterable
+import com.github.shadowsocks.utils.printLog
+import com.github.shadowsocks.utils.resolveResourceId
 import com.github.shadowsocks.widget.UndoSnackbarManager
+import com.google.android.material.textfield.TextInputLayout
 import java.net.IDN
 import java.net.MalformedURLException
 import java.net.URL
@@ -125,23 +127,26 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = validate(position)
 
         private fun validate(template: Int = templateSelector.selectedItemPosition, value: Editable = editText.text) {
-            val error = when (Template.values()[template]) {
-                Template.Generic -> if (value.isEmpty()) "" else null
+            var message = ""
+            positive.isEnabled = when (Template.values()[template]) {
+                Template.Generic -> value.isNotEmpty()
                 Template.Domain -> try {
                     IDN.toASCII(value.toString(), IDN.ALLOW_UNASSIGNED or IDN.USE_STD3_ASCII_RULES)
-                    null
+                    true
                 } catch (e: IllegalArgumentException) {
-                    e.cause?.message ?: e.message
+                    message = e.cause?.localizedMessage ?: e.localizedMessage
+                    false
                 }
                 Template.Url -> try {
-                    URL(value.toString())
-                    null
+                    val url = URL(value.toString())
+                    if ("http".equals(url.protocol, true)) message = getString(R.string.cleartext_http_warning)
+                    true
                 } catch (e: MalformedURLException) {
-                    e.message
+                    message = e.localizedMessage
+                    false
                 }
             }
-            inputLayout.error = error
-            positive.isEnabled = error == null
+            inputLayout.error = message
         }
 
         fun add(): Int? {
@@ -213,13 +218,13 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         override fun onBindViewHolder(holder: AclRuleViewHolder, i: Int) {
             val j = i - acl.subnets.size()
             if (j < 0) holder.bind(acl.subnets[i]) else {
-                val k = j - acl.hostnames.size()
-                if (k < 0) holder.bind(acl.hostnames[j]) else holder.bind(acl.urls[k])
+                val k = j - acl.proxyHostnames.size()
+                if (k < 0) holder.bind(acl.proxyHostnames[j]) else holder.bind(acl.urls[k])
             }
         }
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = AclRuleViewHolder(LayoutInflater
                 .from(parent.context).inflate(android.R.layout.simple_list_item_1, parent, false))
-        override fun getItemCount(): Int = acl.subnets.size() + acl.hostnames.size() + acl.urls.size()
+        override fun getItemCount(): Int = acl.subnets.size() + acl.proxyHostnames.size() + acl.urls.size()
 
         private fun apply() {
             if (!savePending) {
@@ -247,9 +252,9 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
             return index
         }
         fun addHostname(hostname: String): Int {
-            val old = acl.hostnames.size()
-            val index = acl.subnets.size() + acl.hostnames.add(hostname)
-            if (old != acl.hostnames.size()) {
+            val old = acl.proxyHostnames.size()
+            val index = acl.subnets.size() + acl.proxyHostnames.add(hostname)
+            if (old != acl.proxyHostnames.size()) {
                 notifyItemInserted(index)
                 apply()
             }
@@ -257,7 +262,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         }
         fun addURL(url: URL): Int {
             val old = acl.urls.size()
-            val index = acl.subnets.size() + acl.hostnames.size() + acl.urls.add(url)
+            val index = acl.subnets.size() + acl.proxyHostnames.size() + acl.urls.add(url)
             if (old != acl.urls.size()) {
                 notifyItemInserted(index)
                 apply()
@@ -269,7 +274,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
             var result: Int? = null
             if (acl.bypass) acl.subnets.asIterable().asSequence().map { addSubnet(it) }
                     .forEach { if (result == null) result = it }
-            (acl.hostnames.asIterable().asSequence().map { addHostname(it) } +
+            (acl.proxyHostnames.asIterable().asSequence().map { addHostname(it) } +
                     acl.urls.asIterable().asSequence().map { addURL(it) })
                     .forEach { if (result == null) result = it }
             return result
@@ -281,10 +286,10 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
                 undoManager.remove(Pair(i, acl.subnets[i]))
                 acl.subnets.removeItemAt(i)
             } else {
-                val k = j - acl.hostnames.size()
+                val k = j - acl.proxyHostnames.size()
                 if (k < 0) {
-                    undoManager.remove(Pair(j, acl.hostnames[j]))
-                    acl.hostnames.removeItemAt(j)
+                    undoManager.remove(Pair(j, acl.proxyHostnames[j]))
+                    acl.proxyHostnames.removeItemAt(j)
                 } else {
                     undoManager.remove(Pair(k, acl.urls[k]))
                     acl.urls.removeItemAt(k)
@@ -301,12 +306,12 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
                     apply()
                 }
                 is String -> {
-                    notifyItemRemoved(acl.subnets.size() + acl.hostnames.indexOf(item))
-                    acl.hostnames.remove(item)
+                    notifyItemRemoved(acl.subnets.size() + acl.proxyHostnames.indexOf(item))
+                    acl.proxyHostnames.remove(item)
                     apply()
                 }
                 is URL -> {
-                    notifyItemRemoved(acl.subnets.size() + acl.hostnames.size() + acl.urls.indexOf(item))
+                    notifyItemRemoved(acl.subnets.size() + acl.proxyHostnames.size() + acl.urls.indexOf(item))
                     acl.urls.remove(item)
                     apply()
                 }
@@ -325,7 +330,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         fun selectAll() {
             selectedItems.clear()
             selectedItems.addAll(acl.subnets.asIterable())
-            selectedItems.addAll(acl.hostnames.asIterable())
+            selectedItems.addAll(acl.proxyHostnames.asIterable())
             selectedItems.addAll(acl.urls.asIterable())
             onSelectedItemsUpdated()
             notifyDataSetChanged()
@@ -366,12 +371,12 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         toolbar.setTitle(R.string.custom_rules)
         toolbar.inflateMenu(R.menu.custom_rules_menu)
         toolbar.setOnMenuItemClickListener(this)
-        val activity = requireActivity()
+        val activity = activity as MainActivity
         list = view.findViewById(R.id.list)
         list.layoutManager = LinearLayoutManager(activity, RecyclerView.VERTICAL, false)
         list.itemAnimator = DefaultItemAnimator()
         list.adapter = adapter
-        undoManager = UndoSnackbarManager(activity.findViewById(R.id.snackbar), adapter::undo)
+        undoManager = UndoSnackbarManager(activity, adapter::undo)
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.START or ItemTouchHelper.END) {
             override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
                     if (isEnabled && selectedItems.isEmpty()) super.getSwipeDirs(recyclerView, viewHolder) else 0
@@ -404,7 +409,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         selectedItems.forEach {
             when (it) {
                 is Subnet -> acl.subnets.add(it)
-                is String -> acl.hostnames.add(it)
+                is String -> acl.proxyHostnames.add(it)
                 is URL -> acl.urls.add(it)
             }
         }
@@ -418,12 +423,11 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
             dialog.show()
             true
         }
-        R.id.action_import -> {
+        R.id.action_import_clipboard -> {
             try {
                 check(adapter.addToProxy(clipboard.primaryClip!!.getItemAt(0).text.toString()) != null)
             } catch (exc: Exception) {
-                Snackbar.make(requireActivity().findViewById(R.id.snackbar), R.string.action_import_err,
-                        Snackbar.LENGTH_LONG).show()
+                (activity as MainActivity).snackbar().setText(R.string.action_import_err).show()
                 printLog(exc)
             }
             true
@@ -431,7 +435,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         R.id.action_import_gfwlist -> {
             val acl = Acl().fromId(Acl.GFWLIST)
             if (!acl.bypass) acl.subnets.asIterable().forEach { adapter.addSubnet(it) }
-            acl.hostnames.asIterable().forEach { adapter.addHostname(it) }
+            acl.proxyHostnames.asIterable().forEach { adapter.addHostname(it) }
             acl.urls.asIterable().forEach { adapter.addURL(it) }
             true
         }

@@ -33,6 +33,7 @@ import androidx.core.os.bundleOf
 import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.utils.Commandline
+import com.github.shadowsocks.utils.printLog
 import com.github.shadowsocks.utils.signaturesCompat
 import eu.chainfire.libsuperuser.Shell
 import java.io.File
@@ -107,7 +108,7 @@ object PluginManager {
     private fun buildUri(id: String) = Uri.Builder()
             .scheme(PluginContract.SCHEME)
             .authority(PluginContract.AUTHORITY)
-            .path('/' + id)
+            .path("/$id")
             .build()
     fun buildIntent(id: String, action: String): Intent = Intent(action, buildUri(id))
 
@@ -121,14 +122,13 @@ object PluginManager {
             val path = initNative(options)
             if (path != null) return path
         } catch (t: Throwable) {
-            t.printStackTrace()
-            if (throwable == null) throwable = t
+            if (throwable == null) throwable = t else printLog(t)
         }
 
         // add other plugin types here
 
-        throw if (throwable != null) throwable else
-            FileNotFoundException(app.getString(com.github.shadowsocks.R.string.plugin_unknown, options.id))
+        throw throwable
+                ?: FileNotFoundException(app.getString(com.github.shadowsocks.R.string.plugin_unknown, options.id))
     }
 
     private fun initNative(options: PluginOptions): String? {
@@ -143,16 +143,16 @@ object PluginManager {
         return try {
             initNativeFast(cr, options, uri)
         } catch (t: Throwable) {
-            t.printStackTrace()
             Crashlytics.log(Log.WARN, "PluginManager",
                     "Initializing native plugin fast mode failed. Falling back to slow mode.")
+            printLog(t)
             initNativeSlow(cr, options, uri)
         }
     }
 
     private fun initNativeFast(cr: ContentResolver, options: PluginOptions, uri: Uri): String {
         val result = cr.call(uri, PluginContract.METHOD_GET_EXECUTABLE, null,
-                bundleOf(Pair(PluginContract.EXTRA_OPTIONS, options.id))).getString(PluginContract.EXTRA_ENTRY)
+                bundleOf(Pair(PluginContract.EXTRA_OPTIONS, options.id)))!!.getString(PluginContract.EXTRA_ENTRY)!!
         check(File(result).canExecute())
         return result
     }
@@ -173,7 +173,7 @@ object PluginManager {
                 val path = cursor.getString(0)
                 val file = File(pluginDir, path)
                 check(file.absolutePath.startsWith(pluginDirPath))
-                cr.openInputStream(uri.buildUpon().path(path).build()).use { inStream ->
+                cr.openInputStream(uri.buildUpon().path(path).build())!!.use { inStream ->
                     file.outputStream().use { outStream -> inStream.copyTo(outStream) }
                 }
                 list += Commandline.toString(arrayOf("chmod", cursor.getString(1), file.absolutePath))

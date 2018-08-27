@@ -27,6 +27,7 @@ import com.github.shadowsocks.database.PrivateDatabase
 import com.github.shadowsocks.database.PublicDatabase
 import com.github.shadowsocks.utils.DirectBoot
 import com.github.shadowsocks.utils.Key
+import com.github.shadowsocks.utils.TcpFastOpen
 import com.github.shadowsocks.utils.parsePort
 
 object DataStore {
@@ -52,6 +53,7 @@ object DataStore {
         }
     val canToggleLocked: Boolean get() = publicStore.getBoolean(Key.directBootAware) == true
     val directBootAware: Boolean get() = app.directBootSupported && canToggleLocked
+    val tcpFastOpen: Boolean get() = TcpFastOpen.sendEnabled && DataStore.publicStore.getBoolean(Key.tfo, true)
     @AppCompatDelegate.NightMode
     val nightMode get() = when (publicStore.getString(Key.nightMode)) {
         Key.nightModeAuto -> AppCompatDelegate.MODE_NIGHT_AUTO
@@ -60,9 +62,24 @@ object DataStore {
         else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
     }
     val serviceMode get() = publicStore.getString(Key.serviceMode) ?: Key.modeVpn
-    val portProxy get() = getLocalPort(Key.portProxy, 1080)
-    val portLocalDns get() = getLocalPort(Key.portLocalDns, 5450)
-    val portTransproxy get() = getLocalPort(Key.portTransproxy, 8200)
+    var portProxy: Int
+        get() = getLocalPort(Key.portProxy, 1080)
+        set(value) = publicStore.putString(Key.portProxy, value.toString())
+    var portLocalDns: Int
+        get() = getLocalPort(Key.portLocalDns, 5450)
+        set(value) = publicStore.putString(Key.portLocalDns, value.toString())
+    var portTransproxy: Int
+        get() = getLocalPort(Key.portTransproxy, 8200)
+        set(value) = publicStore.putString(Key.portTransproxy, value.toString())
+
+    /**
+     * Initialize settings that have complicated default values.
+     */
+    fun initGlobal() {
+        if (publicStore.getString(Key.portProxy) == null) portProxy = portProxy
+        if (publicStore.getString(Key.portLocalDns) == null) portLocalDns = portLocalDns
+        if (publicStore.getString(Key.portTransproxy) == null) portTransproxy = portTransproxy
+    }
 
     var proxyApps: Boolean
         get() = privateStore.getBoolean(Key.proxyApps) ?: false

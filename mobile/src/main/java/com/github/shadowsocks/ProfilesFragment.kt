@@ -21,6 +21,7 @@
 package com.github.shadowsocks
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -29,16 +30,17 @@ import android.nfc.NdefMessage
 import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.os.Bundle
-import com.google.android.material.snackbar.Snackbar
-import androidx.fragment.app.DialogFragment
-import androidx.appcompat.widget.*
 import android.text.format.Formatter
 import android.view.*
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.appcompat.widget.PopupMenu
+import androidx.appcompat.widget.Toolbar
+import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.getSystemService
 import androidx.core.os.bundleOf
+import androidx.fragment.app.DialogFragment
 import androidx.recyclerview.widget.*
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.bg.BaseService
@@ -47,11 +49,14 @@ import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.plugin.PluginConfiguration
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.Action
+import com.github.shadowsocks.utils.datas
+import com.github.shadowsocks.utils.printLog
 import com.github.shadowsocks.widget.UndoSnackbarManager
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import net.glxn.qrgen.android.QRCode
+import org.json.JSONArray
 
 class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
     companion object {
@@ -61,6 +66,8 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         var instance: ProfilesFragment? = null
 
         private const val KEY_URL = "com.github.shadowsocks.QRCodeDialog.KEY_URL"
+        private const val REQUEST_IMPORT_PROFILES = 1
+        private const val REQUEST_EXPORT_PROFILES = 2
     }
 
     /**
@@ -78,12 +85,11 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
 
     @SuppressLint("ValidFragment")
     class QRCodeDialog() : DialogFragment() {
-
         constructor(url: String) : this() {
             arguments = bundleOf(Pair(KEY_URL, url))
         }
 
-        private val url get() = arguments!!.getString(KEY_URL)
+        private val url get() = arguments?.getString(KEY_URL)!!
         private val nfcShareItem by lazy { url.toByteArray() }
         private var adapter: NfcAdapter? = null
 
@@ -209,7 +215,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
                         .commitAllowingStateLoss()
                 true
             }
-            R.id.action_export -> {
+            R.id.action_export_clipboard -> {
                 clipboard.primaryClip = ClipData.newPlainText(null, this.item.toString())
                 true
             }
@@ -329,8 +335,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         profilesList.itemAnimator = animator
         profilesList.adapter = profilesAdapter
         instance = this
-        undoManager = UndoSnackbarManager(requireActivity().findViewById(R.id.snackbar),
-                profilesAdapter::undo, profilesAdapter::commit)
+        undoManager = UndoSnackbarManager(activity as MainActivity, profilesAdapter::undo, profilesAdapter::commit)
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN,
         ItemTouchHelper.START or ItemTouchHelper.END) {
             override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
@@ -362,35 +367,85 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
                 startActivity(Intent(context, ScannerActivity::class.java))
                 true
             }
-            R.id.action_import -> {
+            R.id.action_import_clipboard -> {
                 try {
-                    val profiles = Profile.findAll(clipboard.primaryClip!!.getItemAt(0).text).toList()
+                    val profiles = Profile.findAllUrls(clipboard.primaryClip!!.getItemAt(0).text, app.currentProfile)
+                            .toList()
                     if (profiles.isNotEmpty()) {
                         profiles.forEach { ProfileManager.createProfile(it) }
-                        Snackbar.make(requireActivity().findViewById(R.id.snackbar), R.string.action_import_msg,
-                                Snackbar.LENGTH_LONG).show()
+                        (activity as MainActivity).snackbar().setText(R.string.action_import_msg).show()
                         return true
                     }
                 } catch (exc: Exception) {
                     exc.printStackTrace()
                 }
-                Snackbar.make(requireActivity().findViewById(R.id.snackbar), R.string.action_import_err,
-                        Snackbar.LENGTH_LONG).show()
+                (activity as MainActivity).snackbar().setText(R.string.action_import_err).show()
+                true
+            }
+            R.id.action_import_file -> {
+                startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }, REQUEST_IMPORT_PROFILES)
                 true
             }
             R.id.action_manual_settings -> {
-                startConfig(ProfileManager.createProfile())
+                startConfig(ProfileManager.createProfile(
+                        Profile().also { app.currentProfile?.copyFeatureSettingsTo(it) }))
                 true
             }
-            R.id.action_export -> {
+            R.id.action_export_clipboard -> {
                 val profiles = ProfileManager.getAllProfiles()
-                Snackbar.make(requireActivity().findViewById(R.id.snackbar), if (profiles != null) {
+                (activity as MainActivity).snackbar().setText(if (profiles != null) {
                     clipboard.primaryClip = ClipData.newPlainText(null, profiles.joinToString("\n"))
                     R.string.action_export_msg
-                } else R.string.action_export_err, Snackbar.LENGTH_LONG).show()
+                } else R.string.action_export_err).show()
+                true
+            }
+            R.id.action_export_file -> {
+                startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_TITLE, "profiles.json")   // optional title that can be edited
+                }, REQUEST_EXPORT_PROFILES)
                 true
             }
             else -> false
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (resultCode != Activity.RESULT_OK) super.onActivityResult(requestCode, resultCode, data)
+        else when (requestCode) {
+            REQUEST_IMPORT_PROFILES -> {
+                val feature = app.currentProfile
+                var success = false
+                val activity = activity as MainActivity
+                for (uri in data!!.datas) try {
+                    Profile.parseJson(activity.contentResolver.openInputStream(uri)!!.bufferedReader().readText(),
+                            feature).forEach {
+                        ProfileManager.createProfile(it)
+                        success = true
+                    }
+                } catch (e: Exception) {
+                    printLog(e)
+                }
+                activity.snackbar().setText(if (success) R.string.action_import_msg else R.string.action_import_err)
+                        .show()
+            }
+            REQUEST_EXPORT_PROFILES -> {
+                val profiles = ProfileManager.getAllProfiles()
+                if (profiles != null) try {
+                    requireContext().contentResolver.openOutputStream(data?.data!!)!!.bufferedWriter().use {
+                        it.write(JSONArray(profiles.map { it.toJson() }.toTypedArray()).toString(2))
+                    }
+                } catch (e: Exception) {
+                    printLog(e)
+                    (activity as MainActivity).snackbar(e.localizedMessage).show()
+                }
+            }
+            else -> super.onActivityResult(requestCode, resultCode, data)
         }
     }
 
@@ -415,9 +470,9 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         profilesAdapter.deepRefreshId(profileId)
     }
 
-    override fun onDetach() {
+    override fun onDestroyView() {
         undoManager.flush()
-        super.onDetach()
+        super.onDestroyView()
     }
 
     override fun onDestroy() {

@@ -20,9 +20,9 @@
 
 package com.github.shadowsocks.preference
 
-import androidx.appcompat.app.AlertDialog
 import android.view.View
 import android.widget.EditText
+import androidx.appcompat.app.AlertDialog
 import com.github.shadowsocks.ProfileConfigActivity
 import com.github.shadowsocks.plugin.PluginContract
 import com.github.shadowsocks.plugin.PluginManager
@@ -38,7 +38,7 @@ class PluginConfigurationDialogFragment : EditTextPreferenceDialogFragmentCompat
 
     override fun onPrepareDialogBuilder(builder: AlertDialog.Builder) {
         super.onPrepareDialogBuilder(builder)
-        val intent = PluginManager.buildIntent(arguments!!.getString(PLUGIN_ID_FRAGMENT_TAG),
+        val intent = PluginManager.buildIntent(arguments?.getString(PLUGIN_ID_FRAGMENT_TAG)!!,
                 PluginContract.ACTION_HELP)
         val activity = requireActivity()
         if (intent.resolveActivity(activity.packageManager) != null) builder.setNeutralButton("?") { _, _ ->

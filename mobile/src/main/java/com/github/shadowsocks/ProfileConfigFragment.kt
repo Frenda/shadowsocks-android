@@ -26,15 +26,13 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.UserManager
-import com.google.android.material.snackbar.Snackbar
-import androidx.preference.SwitchPreference
-import androidx.appcompat.app.AlertDialog
-import androidx.preference.Preference
-import androidx.preference.PreferenceDataStore
-import androidx.appcompat.widget.Toolbar
 import android.view.MenuItem
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.getSystemService
 import androidx.core.os.bundleOf
+import androidx.preference.Preference
+import androidx.preference.PreferenceDataStore
+import androidx.preference.SwitchPreference
 import com.github.shadowsocks.App.Companion.app
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.database.ProfileManager
@@ -52,7 +50,7 @@ import com.github.shadowsocks.utils.Key
 import com.takisoft.preferencex.EditTextPreference
 import com.takisoft.preferencex.PreferenceFragmentCompat
 
-class ProfileConfigFragment : PreferenceFragmentCompat(), Toolbar.OnMenuItemClickListener,
+class ProfileConfigFragment : PreferenceFragmentCompat(),
         Preference.OnPreferenceChangeListener, OnPreferenceDataStoreChangeListener {
     companion object {
         private const val REQUEST_CODE_PLUGIN_CONFIGURE = 1
@@ -95,7 +93,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(), Toolbar.OnMenuItemClic
             pluginConfigure.isEnabled = newValue.isNotEmpty()
             pluginConfigure.text = pluginConfiguration.selectedOptions.toString()
             if (PluginManager.fetchPlugins()[newValue]?.trusted == false)
-                Snackbar.make(view!!, R.string.plugin_untrusted, Snackbar.LENGTH_LONG).show()
+                (activity as MainActivity).snackbar().setText(R.string.plugin_untrusted).show()
             true
         }
         pluginConfigure.onPreferenceChangeListener = this
@@ -145,7 +143,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(), Toolbar.OnMenuItemClic
         DataStore.dirty = true
         true
     } catch (exc: IllegalArgumentException) {
-        Snackbar.make(view!!, exc.localizedMessage, Snackbar.LENGTH_LONG).show()
+        (activity as MainActivity).snackbar(exc.localizedMessage).show()
         false
     }
 
@@ -172,11 +170,10 @@ class ProfileConfigFragment : PreferenceFragmentCompat(), Toolbar.OnMenuItemClic
                 onPreferenceChange(null, options)
             }
             PluginContract.RESULT_FALLBACK -> showPluginEditor()
-
         } else super.onActivityResult(requestCode, resultCode, data)
     }
 
-    override fun onMenuItemClick(item: MenuItem) = when (item.itemId) {
+    override fun onOptionsItemSelected(item: MenuItem?) = when (item?.itemId) {
         R.id.action_delete -> {
             val activity = requireActivity()
             AlertDialog.Builder(activity)
