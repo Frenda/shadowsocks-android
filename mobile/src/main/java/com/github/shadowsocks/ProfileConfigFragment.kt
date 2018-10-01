@@ -33,7 +33,7 @@ import androidx.core.os.bundleOf
 import androidx.preference.Preference
 import androidx.preference.PreferenceDataStore
 import androidx.preference.SwitchPreference
-import com.github.shadowsocks.App.Companion.app
+import com.github.shadowsocks.Core.app
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.plugin.PluginConfiguration
@@ -98,7 +98,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         }
         pluginConfigure.onPreferenceChangeListener = this
         initPlugins()
-        receiver = app.listenForPackageChanges(false) { initPlugins() }
+        receiver = Core.listenForPackageChanges(false) { initPlugins() }
         DataStore.privateStore.registerChangeListener(this)
     }
 
@@ -156,8 +156,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
             val intent = PluginManager.buildIntent(pluginConfiguration.selected, PluginContract.ACTION_CONFIGURE)
             if (intent.resolveActivity(requireContext().packageManager) == null) showPluginEditor() else
                 startActivityForResult(intent
-                        .putExtra(PluginContract.EXTRA_OPTIONS, pluginConfiguration.selectedOptions.toString())
-                        .putExtra(PluginContract.EXTRA_NIGHT_MODE, DataStore.nightMode),
+                        .putExtra(PluginContract.EXTRA_OPTIONS, pluginConfiguration.selectedOptions.toString()),
                         REQUEST_CODE_PLUGIN_CONFIGURE)
         } else super.onDisplayPreferenceDialog(preference)
     }
