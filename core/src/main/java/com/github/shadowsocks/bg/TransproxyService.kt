@@ -27,10 +27,7 @@ import com.github.shadowsocks.preference.DataStore
 import java.io.File
 
 class TransproxyService : Service(), LocalDnsService.Interface {
-    init {
-        BaseService.register(this)
-    }
-
+    override val data = BaseService.Data(this)
     override val tag: String get() = "ShadowsocksTransproxyService"
     override fun createNotification(profileName: String): ServiceNotification =
             ServiceNotification(this, profileName, "service-transproxy", true)
@@ -39,19 +36,21 @@ class TransproxyService : Service(), LocalDnsService.Interface {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
             super<LocalDnsService.Interface>.onStartCommand(intent, flags, startId)
 
-    private fun startDNSTunnel() {
+    private suspend fun startDNSTunnel() {
+        val proxy = data.proxy!!
         val cmd = arrayListOf(File(applicationInfo.nativeLibraryDir, Executable.SS_TUNNEL).absolutePath,
                 "-t", "10",
                 "-b", DataStore.listenAddress,
                 "-u",
-                "-l", DataStore.portLocalDns.toString(),            // ss-tunnel listens on the same port as overture
-                "-L", data.profile!!.remoteDns.split(",").first().trim() + ":53",
-                "-c", data.shadowsocksConfigFile!!.absolutePath)    // config is already built by BaseService.Interface
+                "-l", DataStore.portLocalDns.toString(),    // ss-tunnel listens on the same port as overture
+                "-L", proxy.profile.remoteDns.split(",").first().trim() + ":53",
+                // config is already built by BaseService.Interface
+                "-c", (data.udpFallback ?: proxy).configFile!!.absolutePath)
         if (DataStore.tcpFastOpen) cmd += "--fast-open"
-        data.processes.start(cmd)
+        data.processes!!.start(cmd)
     }
 
-    private fun startRedsocksDaemon() {
+    private suspend fun startRedsocksDaemon() {
         File(Core.deviceStorage.noBackupFilesDir, "redsocks.conf").writeText("""base {
  log_debug = off;
  log_info = off;
@@ -67,13 +66,18 @@ redsocks {
  type = socks5;
 }
 """)
-        data.processes.start(listOf(
+        data.processes!!.start(listOf(
                 File(applicationInfo.nativeLibraryDir, Executable.REDSOCKS).absolutePath, "-c", "redsocks.conf"))
     }
 
-    override fun startNativeProcesses() {
+    override suspend fun startProcesses() {
         startRedsocksDaemon()
-        super.startNativeProcesses()
-        if (data.profile!!.udpdns) startDNSTunnel()
+        super.startProcesses()
+        if (data.proxy!!.profile.udpdns) startDNSTunnel()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        data.binder.close()
     }
 }

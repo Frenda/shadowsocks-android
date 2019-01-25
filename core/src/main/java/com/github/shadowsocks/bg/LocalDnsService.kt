@@ -32,10 +32,10 @@ import org.json.JSONObject
 
 object LocalDnsService {
     interface Interface : BaseService.Interface {
-        override fun startNativeProcesses() {
-            super.startNativeProcesses()
+        override suspend fun startProcesses() {
+            super.startProcesses()
             val data = data
-            val profile = data.profile!!
+            val profile = data.proxy!!.profile
 
             fun makeDns(name: String, address: String, timeout: Int, edns: Boolean = true) = JSONObject().apply {
                 put("Name", name)
@@ -46,7 +46,7 @@ object LocalDnsService {
                 put("Timeout", timeout)
                 put("EDNSClientSubnet", JSONObject().put("Policy", "disable"))
                 put("Protocol", if (edns) {
-                    put("Socks5Address", "127.0.0.1:" + DataStore.portProxy)
+                    put("Socks5Address", "127.0.0.1:${DataStore.portProxy}")
                     "tcp"
                 } else "udp")
             }
@@ -69,7 +69,8 @@ object LocalDnsService {
                         Acl.BYPASS_CHN, Acl.BYPASS_LAN_CHN, Acl.GFWLIST, Acl.CUSTOM_RULES -> {
                             put("PrimaryDNS", localDns)
                             put("AlternativeDNS", remoteDns)
-                            put("IPNetworkFile", "china_ip_list.txt")
+                            put("IPNetworkFile", JSONObject(mapOf("Alternative" to "china_ip_list.txt")))
+                            put("AclFile", "domain_exceptions.acl")
                         }
                         Acl.CHINALIST -> {
                             put("PrimaryDNS", localDns)
@@ -85,7 +86,7 @@ object LocalDnsService {
                 })
             }
 
-            if (!profile.udpdns) data.processes.start(buildAdditionalArguments(arrayListOf(
+            if (!profile.udpdns) data.processes!!.start(buildAdditionalArguments(arrayListOf(
                     File(app.applicationInfo.nativeLibraryDir, Executable.OVERTURE).absolutePath,
                     "-c", buildOvertureConfig("overture.conf"))))
         }

@@ -21,12 +21,14 @@
 package com.github.shadowsocks.utils
 
 import android.os.SystemClock
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
 import com.github.shadowsocks.Core
 import com.github.shadowsocks.Core.app
 import com.github.shadowsocks.acl.Acl
-import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.core.R
 import com.github.shadowsocks.preference.DataStore
+import kotlinx.coroutines.*
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -36,46 +38,81 @@ import java.net.URL
 /**
  * Based on: https://android.googlesource.com/platform/frameworks/base/+/b19a838/services/core/java/com/android/server/connectivity/NetworkMonitor.java#1071
  */
-class HttpsTest(private val setStatus: (CharSequence?) -> Unit, private val errorCallback: (CharSequence) -> Unit) {
-    private var testCount = 0
+class HttpsTest : ViewModel() {
+    sealed class Status {
+        protected abstract val status: CharSequence
+        open fun retrieve(setStatus: (CharSequence) -> Unit, errorCallback: (String) -> Unit) = setStatus(status)
+
+        object Idle : Status() {
+            override val status get() = app.getText(R.string.vpn_connected)
+        }
+        object Testing : Status() {
+            override val status get() = app.getText(R.string.connection_test_testing)
+        }
+        class Success(private val elapsed: Long) : Status() {
+            override val status get() = app.getString(R.string.connection_test_available, elapsed)
+        }
+        sealed class Error : Status() {
+            override val status get() = app.getText(R.string.connection_test_fail)
+            protected abstract val error: String
+            private var shown = false
+            override fun retrieve(setStatus: (CharSequence) -> Unit, errorCallback: (String) -> Unit) {
+                super.retrieve(setStatus, errorCallback)
+                if (shown) return
+                shown = true
+                errorCallback(error)
+            }
+
+            class UnexpectedResponseCode(private val code: Int) : Error() {
+                override val error get() = app.getString(R.string.connection_test_error_status_code, code)
+            }
+            class IOFailure(private val e: IOException) : Error() {
+                override val error get() = app.getString(R.string.connection_test_error, e.message)
+            }
+        }
+    }
+
+    private var running: Pair<HttpURLConnection, Job>? = null
+    val status = MutableLiveData<Status>().apply { value = Status.Idle }
 
     fun testConnection() {
-        ++testCount
-        setStatus(app.getText(R.string.connection_test_testing))
-        val id = testCount  // it would change by other code
-        thread("ConnectionTest") {
-            val url = URL("https", when (Core.currentProfile!!.route) {
-                Acl.CHINALIST -> "www.qualcomm.cn"
-                else -> "www.google.com"
-            }, "/generate_204")
-            val conn = (if (BaseService.usingVpnMode) url.openConnection() else
-                url.openConnection(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", DataStore.portProxy))))
-                    as HttpURLConnection
-            conn.setRequestProperty("Connection", "close")
-            conn.instanceFollowRedirects = false
-            conn.useCaches = false
-            val (success, result) = try {
-                val start = SystemClock.elapsedRealtime()
-                val code = conn.responseCode
-                val elapsed = SystemClock.elapsedRealtime() - start
-                if (code == 204 || code == 200 && conn.responseLength == 0L)
-                    Pair(true, app.getString(R.string.connection_test_available, elapsed))
-                else throw IOException(app.getString(R.string.connection_test_error_status_code, code))
-            } catch (e: IOException) {
-                Pair(false, app.getString(R.string.connection_test_error, e.message))
-            } finally {
-                conn.disconnect()
-            }
-            if (testCount == id) Core.handler.post {
-                if (success) setStatus(result) else {
-                    setStatus(app.getText(R.string.connection_test_fail))
-                    errorCallback(result)
+        cancelTest()
+        status.value = Status.Testing
+        val url = URL("https", when (Core.currentProfile!!.first.route) {
+            Acl.CHINALIST -> "www.qualcomm.cn"
+            else -> "www.google.com"
+        }, "/generate_204")
+        val conn = (if (DataStore.serviceMode == Key.modeVpn) url.openConnection() else
+            url.openConnection(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", DataStore.portProxy))))
+                as HttpURLConnection
+        conn.setRequestProperty("Connection", "close")
+        conn.instanceFollowRedirects = false
+        conn.useCaches = false
+        running = conn to GlobalScope.launch(Dispatchers.Main, CoroutineStart.UNDISPATCHED) {
+            status.value = withContext(Dispatchers.IO) {
+                try {
+                    val start = SystemClock.elapsedRealtime()
+                    val code = conn.responseCode
+                    val elapsed = SystemClock.elapsedRealtime() - start
+                    if (code == 204 || code == 200 && conn.responseLength == 0L) Status.Success(elapsed)
+                    else Status.Error.UnexpectedResponseCode(code)
+                } catch (e: IOException) {
+                    Status.Error.IOFailure(e)
+                } finally {
+                    conn.disconnect()
                 }
             }
         }
     }
 
+    private fun cancelTest() = running?.let { (conn, job) ->
+        job.cancel()    // ensure job is cancelled before interrupting
+        conn.disconnect()
+        running = null
+    }
+
     fun invalidate() {
-        testCount += 1
+        cancelTest()
+        status.value = Status.Idle
     }
 }

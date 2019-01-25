@@ -31,14 +31,16 @@ import android.system.ErrnoException
 import android.system.Os
 import androidx.core.content.getSystemService
 import com.github.shadowsocks.Core
-import com.github.shadowsocks.JniHelper
 import com.github.shadowsocks.VpnRequestActivity
 import com.github.shadowsocks.acl.Acl
 import com.github.shadowsocks.core.R
 import com.github.shadowsocks.preference.DataStore
+import com.github.shadowsocks.utils.Key
 import com.github.shadowsocks.utils.Subnet
 import com.github.shadowsocks.utils.parseNumericAddress
 import com.github.shadowsocks.utils.printLog
+import kotlinx.coroutines.*
+import java.io.Closeable
 import java.io.File
 import java.io.FileDescriptor
 import java.io.IOException
@@ -73,37 +75,48 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
                 .build()
     }
 
-    private inner class ProtectWorker : LocalSocketListener("ShadowsocksVpnThread") {
-        override val socketFile: File = File(Core.deviceStorage.noBackupFilesDir, "protect_path")
+    class CloseableFd(val fd: FileDescriptor) : Closeable {
+        override fun close() = Os.close(fd)
+    }
+
+    private inner class ProtectWorker :
+            LocalSocketListener("ShadowsocksVpnThread", File(Core.deviceStorage.noBackupFilesDir, "protect_path")),
+            CoroutineScope {
+        private val job = SupervisorJob()
+        override val coroutineContext get() = Dispatchers.IO + job + CoroutineExceptionHandler { _, t -> printLog(t) }
 
         override fun accept(socket: LocalSocket) {
-            try {
-                socket.inputStream.read()
-                val fd = socket.ancillaryFileDescriptors!!.single()!!
-                socket.outputStream.write(if (try {
-                            val network = underlyingNetwork
-                            if (network != null && Build.VERSION.SDK_INT >= 23) {
-                                network.bindSocket(fd)
-                                true
-                            } else protect(getInt.invoke(fd) as Int)
-                        } finally {
-                            try {
-                                Os.close(fd)
-                            } catch (e: ErrnoException) {
-                                printLog(e)
-                            }
-                        }) 0 else 1)
-            } catch (e: IOException) {
-                printLog(e)
+            launch {
+                socket.use {
+                    socket.inputStream.read()
+                    val fd = socket.ancillaryFileDescriptors!!.single()!!
+                    CloseableFd(fd).use {
+                        socket.outputStream.write(if (underlyingNetwork.let { network ->
+                                    if (network != null && Build.VERSION.SDK_INT >= 23) try {
+                                        network.bindSocket(fd)
+                                        true
+                                    } catch (e: IOException) {
+                                        // suppress ENONET (Machine is not on the network)
+                                        if ((e.cause as? ErrnoException)?.errno != 64) printLog(e)
+                                        false
+                                    } else protect(getInt.invoke(fd) as Int)
+                                }) 0 else 1)
+                    }
+                }
             }
         }
-    }
-    class NullConnectionException : NullPointerException()
 
-    init {
-        BaseService.register(this)
+        suspend fun shutdown() {
+            job.cancel()
+            close()
+            job.join()
+        }
+    }
+    inner class NullConnectionException : NullPointerException() {
+        override fun getLocalizedMessage() = getString(R.string.reboot_required)
     }
 
+    override val data = BaseService.Data(this)
     override val tag: String get() = "ShadowsocksVpnService"
     override fun createNotification(profileName: String): ServiceNotification =
             ServiceNotification(this, profileName, "service-vpn")
@@ -111,14 +124,14 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
     private var conn: ParcelFileDescriptor? = null
     private var worker: ProtectWorker? = null
     private var underlyingNetwork: Network? = null
-        @TargetApi(28)
+        @TargetApi(24)
         set(value) {
             setUnderlyingNetworks(if (value == null) null else arrayOf(value))
             field = value
         }
 
     private val connectivity by lazy { getSystemService<ConnectivityManager>()!! }
-    @TargetApi(28)
+    @TargetApi(24)
     private val defaultNetworkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             underlyingNetwork = network
@@ -138,14 +151,14 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
         else -> super<LocalDnsService.Interface>.onBind(intent)
     }
 
-    override fun onRevoke() = stopRunner(true)
+    override fun onRevoke() = stopRunner()
 
-    override fun killProcesses() {
+    override suspend fun killProcesses() {
         if (listeningForDefaultNetwork) {
             connectivity.unregisterNetworkCallback(defaultNetworkCallback)
             listeningForDefaultNetwork = false
         }
-        worker?.stopThread()
+        worker?.shutdown()
         worker = null
         super.killProcesses()
         conn?.close()
@@ -153,21 +166,19 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (BaseService.usingVpnMode)
+        if (DataStore.serviceMode == Key.modeVpn)
             if (BaseVpnService.prepare(this) != null)
                 startActivity(Intent(this, VpnRequestActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             else return super<LocalDnsService.Interface>.onStartCommand(intent, flags, startId)
-        stopRunner(true)
+        stopRunner()
         return Service.START_NOT_STICKY
     }
 
-    override fun startNativeProcesses() {
-        val worker = ProtectWorker()
-        worker.start()
-        this.worker = worker
+    override suspend fun startProcesses() {
+        worker = ProtectWorker().apply { start() }
 
-        super.startNativeProcesses()
+        super.startProcesses()
 
         sendFd(startVpn())
     }
@@ -177,8 +188,8 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
         return cmd
     }
 
-    private fun startVpn(): Int {
-        val profile = data.profile!!
+    private suspend fun startVpn(): FileDescriptor {
+        val profile = data.proxy!!.profile
         val builder = Builder()
                 .setConfigureIntent(Core.configureIntent(this))
                 .setSession(profile.formattedName)
@@ -223,7 +234,7 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
         this.conn = conn
         val fd = conn.fd
 
-        if (Build.VERSION.SDK_INT >= 28) {
+        if (Build.VERSION.SDK_INT >= 24) {
             // we want REQUEST here instead of LISTEN
             connectivity.requestNetwork(defaultNetworkRequest, defaultNetworkCallback)
             listeningForDefaultNetwork = true
@@ -246,27 +257,35 @@ class VpnService : BaseVpnService(), LocalDnsService.Interface {
             cmd += "--dnsgw"
             cmd += "127.0.0.1:${DataStore.portLocalDns}"
         }
-        data.processes.start(cmd) {
+        data.processes!!.start(cmd, onRestartCallback = {
             try {
-                sendFd(fd)
+                sendFd(conn.fileDescriptor)
             } catch (e: ErrnoException) {
-                stopRunner(true, e.message)
+                stopRunner(false, e.message)
             }
-        }
-        return fd
+        })
+        return conn.fileDescriptor
     }
 
-    private fun sendFd(fd: Int) {
-        if (fd == -1) throw IOException("Invalid fd (-1)")
+    private suspend fun sendFd(fd: FileDescriptor) {
         var tries = 0
         val path = File(Core.deviceStorage.noBackupFilesDir, "sock_path").absolutePath
         while (true) try {
-            Thread.sleep(30L shl tries)
-            JniHelper.sendFd(fd, path)
+            delay(50L shl tries)
+            LocalSocket().use { localSocket ->
+                localSocket.connect(LocalSocketAddress(path, LocalSocketAddress.Namespace.FILESYSTEM))
+                localSocket.setFileDescriptorsForSend(arrayOf(fd))
+                localSocket.outputStream.write(42)
+            }
             return
-        } catch (e: ErrnoException) {
-            if (tries >= 10) throw e
+        } catch (e: IOException) {
+            if (tries > 5) throw e
             tries += 1
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        data.binder.close()
     }
 }

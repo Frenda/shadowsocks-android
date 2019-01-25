@@ -44,7 +44,6 @@ import com.github.shadowsocks.ToolbarFragment
 import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.utils.Subnet
 import com.github.shadowsocks.utils.asIterable
-import com.github.shadowsocks.utils.printLog
 import com.github.shadowsocks.utils.resolveResourceId
 import com.github.shadowsocks.widget.UndoSnackbarManager
 import com.google.android.material.textfield.TextInputLayout
@@ -166,6 +165,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
         private val text = view.findViewById<TextView>(android.R.id.text1)
 
         init {
+            view.isFocusable = true
             view.setOnClickListener(this)
             view.setOnLongClickListener(this)
             view.setBackgroundResource(R.drawable.background_selectable)
@@ -338,7 +338,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
     }
 
     private val isEnabled get() = when ((activity as MainActivity).state) {
-        BaseService.CONNECTED -> Core.currentProfile?.route != Acl.CUSTOM_RULES
+        BaseService.CONNECTED -> Core.currentProfile?.first?.route != Acl.CUSTOM_RULES
         BaseService.STOPPED -> true
         else -> false
     }
@@ -428,7 +428,7 @@ class CustomRulesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, 
                 check(adapter.addToProxy(clipboard.primaryClip!!.getItemAt(0).text.toString()) != null)
             } catch (exc: Exception) {
                 (activity as MainActivity).snackbar().setText(R.string.action_import_err).show()
-                printLog(exc)
+                exc.printStackTrace()
             }
             true
         }

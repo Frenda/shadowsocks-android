@@ -47,6 +47,7 @@ import com.github.shadowsocks.preference.PluginConfigurationDialogFragment
 import com.github.shadowsocks.utils.Action
 import com.github.shadowsocks.utils.DirectBoot
 import com.github.shadowsocks.utils.Key
+import com.google.android.material.snackbar.Snackbar
 import com.takisoft.preferencex.EditTextPreference
 import com.takisoft.preferencex.PreferenceFragmentCompat
 
@@ -62,6 +63,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
     private lateinit var pluginConfigure: EditTextPreference
     private lateinit var pluginConfiguration: PluginConfiguration
     private lateinit var receiver: BroadcastReceiver
+    private lateinit var udpFallback: Preference
 
     override fun onCreatePreferencesFix(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceManager.preferenceDataStore = DataStore.privateStore
@@ -92,13 +94,15 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
             DataStore.dirty = true
             pluginConfigure.isEnabled = newValue.isNotEmpty()
             pluginConfigure.text = pluginConfiguration.selectedOptions.toString()
-            if (PluginManager.fetchPlugins()[newValue]?.trusted == false)
-                (activity as MainActivity).snackbar().setText(R.string.plugin_untrusted).show()
+            if (PluginManager.fetchPlugins()[newValue]?.trusted == false) {
+                Snackbar.make(view!!, R.string.plugin_untrusted, Snackbar.LENGTH_LONG).show()
+            }
             true
         }
         pluginConfigure.onPreferenceChangeListener = this
         initPlugins()
         receiver = Core.listenForPackageChanges(false) { initPlugins() }
+        udpFallback = findPreference(Key.udpFallback)
         DataStore.privateStore.registerChangeListener(this)
     }
 
@@ -126,13 +130,16 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         profile.deserialize()
         ProfileManager.updateProfile(profile)
         ProfilesFragment.instance?.profilesAdapter?.deepRefreshId(profileId)
-        if (DataStore.profileId == profileId && DataStore.directBootAware) DirectBoot.update()
+        if (profileId in Core.activeProfileIds && DataStore.directBootAware) DirectBoot.update()
         requireActivity().finish()
     }
 
     override fun onResume() {
         super.onResume()
         isProxyApps.isChecked = DataStore.proxyApps // fetch proxyApps updated by AppManager
+        val fallbackProfile = DataStore.udpFallback?.let { ProfileManager.getProfile(it) }
+        if (fallbackProfile == null) udpFallback.setSummary(R.string.plugin_disabled)
+        else udpFallback.summary = fallbackProfile.formattedName
     }
 
     override fun onPreferenceChange(preference: Preference?, newValue: Any?): Boolean = try {
@@ -142,8 +149,8 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         DataStore.plugin = pluginConfiguration.toString()
         DataStore.dirty = true
         true
-    } catch (exc: IllegalArgumentException) {
-        (activity as MainActivity).snackbar(exc.localizedMessage).show()
+    } catch (exc: RuntimeException) {
+        Snackbar.make(view!!, exc.localizedMessage, Snackbar.LENGTH_LONG).show()
         false
     }
 
