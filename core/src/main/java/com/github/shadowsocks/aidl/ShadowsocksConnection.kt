@@ -28,6 +28,7 @@ import android.os.DeadObjectException
 import android.os.Handler
 import android.os.IBinder
 import android.os.RemoteException
+import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.bg.ProxyService
 import com.github.shadowsocks.bg.TransproxyService
 import com.github.shadowsocks.bg.VpnService
@@ -38,7 +39,8 @@ import com.github.shadowsocks.utils.Key
 /**
  * This object should be compact as it will not get GC-ed.
  */
-class ShadowsocksConnection(private val handler: Handler = Handler(), private var listenForDeath: Boolean = false) :
+class ShadowsocksConnection(private val handler: Handler = Handler(),
+                            private var listenForDeath: Boolean = false) :
         ServiceConnection, IBinder.DeathRecipient {
     companion object {
         val serviceClass get() = when (DataStore.serviceMode) {
@@ -50,7 +52,7 @@ class ShadowsocksConnection(private val handler: Handler = Handler(), private va
     }
 
     interface Callback {
-        fun stateChanged(state: Int, profileName: String?, msg: String?)
+        fun stateChanged(state: BaseService.State, profileName: String?, msg: String?)
         fun trafficUpdated(profileId: Long, stats: TrafficStats) { }
         fun trafficPersisted(profileId: Long) { }
 
@@ -67,22 +69,25 @@ class ShadowsocksConnection(private val handler: Handler = Handler(), private va
     private var callback: Callback? = null
     private val serviceCallback = object : IShadowsocksServiceCallback.Stub() {
         override fun stateChanged(state: Int, profileName: String?, msg: String?) {
-            handler.post { callback!!.stateChanged(state, profileName, msg) }
+            val callback = callback ?: return
+            handler.post { callback.stateChanged(BaseService.State.values()[state], profileName, msg) }
         }
         override fun trafficUpdated(profileId: Long, stats: TrafficStats) {
-            handler.post { callback!!.trafficUpdated(profileId, stats) }
+            val callback = callback ?: return
+            handler.post { callback.trafficUpdated(profileId, stats) }
         }
         override fun trafficPersisted(profileId: Long) {
-            handler.post { callback!!.trafficPersisted(profileId) }
+            val callback = callback ?: return
+            handler.post { callback.trafficPersisted(profileId) }
         }
     }
     private var binder: IBinder? = null
 
-    var listeningForBandwidth = false
+    var bandwidthTimeout = 0L
         set(value) {
             val service = service
-            if (listeningForBandwidth != value && service != null)
-                if (value) service.startListeningForBandwidth(serviceCallback) else try {
+            if (bandwidthTimeout != value && service != null)
+                if (value > 0) service.startListeningForBandwidth(serviceCallback, value) else try {
                     service.stopListeningForBandwidth(serviceCallback)
                 } catch (_: DeadObjectException) { }
             field = value
@@ -97,21 +102,21 @@ class ShadowsocksConnection(private val handler: Handler = Handler(), private va
         if (!callbackRegistered) try {
             service.registerCallback(serviceCallback)
             callbackRegistered = true
-            if (listeningForBandwidth) service.startListeningForBandwidth(serviceCallback)
+            if (bandwidthTimeout > 0) service.startListeningForBandwidth(serviceCallback, bandwidthTimeout)
         } catch (_: RemoteException) { }
         callback!!.onServiceConnected(service)
     }
 
     override fun onServiceDisconnected(name: ComponentName?) {
         unregisterCallback()
-        callback!!.onServiceDisconnected()
+        callback?.onServiceDisconnected()
         service = null
         binder = null
     }
 
     override fun binderDied() {
         service = null
-        handler.post(callback!!::onBinderDied)
+        callback?.also { handler.post(it::onBinderDied) }
     }
 
     private fun unregisterCallback() {

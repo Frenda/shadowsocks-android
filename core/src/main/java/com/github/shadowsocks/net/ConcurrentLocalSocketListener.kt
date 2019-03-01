@@ -1,7 +1,7 @@
 /*******************************************************************************
  *                                                                             *
- *  Copyright (C) 2017 by Max Lv <max.c.lv@gmail.com>                          *
- *  Copyright (C) 2017 by Mygod Studio <contact-shadowsocks-android@mygod.be>  *
+ *  Copyright (C) 2019 by Max Lv <max.c.lv@gmail.com>                          *
+ *  Copyright (C) 2019 by Mygod Studio <contact-shadowsocks-android@mygod.be>  *
  *                                                                             *
  *  This program is free software: you can redistribute it and/or modify       *
  *  it under the terms of the GNU General Public License as published by       *
@@ -18,23 +18,26 @@
  *                                                                             *
  *******************************************************************************/
 
-package com.github.shadowsocks.utils
+package com.github.shadowsocks.net
 
-import android.annotation.SuppressLint
-import android.annotation.TargetApi
-import android.app.Application
-import android.content.Context
+import android.net.LocalSocket
+import com.github.shadowsocks.utils.printLog
+import kotlinx.coroutines.*
+import java.io.File
 
-@SuppressLint("Registered")
-@TargetApi(24)
-class DeviceStorageApp(context: Context) : Application() {
-    init {
-        attachBaseContext(context.createDeviceProtectedStorageContext())
+abstract class ConcurrentLocalSocketListener(name: String, socketFile: File) : LocalSocketListener(name, socketFile),
+        CoroutineScope {
+    private val job = SupervisorJob()
+    override val coroutineContext get() = Dispatchers.IO + job + CoroutineExceptionHandler { _, t -> printLog(t) }
+
+    override fun accept(socket: LocalSocket) {
+        launch { super.accept(socket) }
     }
 
-    /**
-     * Thou shalt not get the REAL underlying application context which would no longer be operating under device
-     * protected storage.
-     */
-    override fun getApplicationContext() = this
+    override fun shutdown(scope: CoroutineScope) {
+        running = false
+        job.cancel()
+        super.shutdown(scope)
+        scope.launch { job.join() }
+    }
 }

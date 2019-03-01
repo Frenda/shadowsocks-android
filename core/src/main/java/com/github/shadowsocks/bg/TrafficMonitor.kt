@@ -23,17 +23,18 @@ package com.github.shadowsocks.bg
 import android.net.LocalSocket
 import android.os.SystemClock
 import com.github.shadowsocks.aidl.TrafficStats
+import com.github.shadowsocks.net.LocalSocketListener
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-class TrafficMonitor(statFile: File) : AutoCloseable {
-    private val thread = object : LocalSocketListener("TrafficMonitor", statFile) {
-        override fun accept(socket: LocalSocket) = socket.use {
-            val buffer = ByteArray(16)
+class TrafficMonitor(statFile: File) {
+    val thread = object : LocalSocketListener("TrafficMonitor-" + statFile.name, statFile) {
+        private val buffer = ByteArray(16)
+        private val stat = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN)
+        override fun acceptInternal(socket: LocalSocket) {
             if (socket.inputStream.read(buffer) != 16) throw IOException("Unexpected traffic stat length")
-            val stat = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN)
             val tx = stat.getLong(0)
             val rx = stat.getLong(8)
             if (current.txTotal != tx) {
@@ -78,6 +79,4 @@ class TrafficMonitor(statFile: File) : AutoCloseable {
         }
         return Pair(out, updated)
     }
-
-    override fun close() = thread.close()
 }
