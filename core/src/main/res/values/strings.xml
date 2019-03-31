@@ -36,6 +36,8 @@
   <!-- feature category -->
   <string name="ipv6">IPv6 Route</string>
   <string name="ipv6_summary">Redirect IPv6 traffic to remote</string>
+  <string name="metered">Metered Hint</string>
+  <string name="metered_summary">Hint system to treat VPN as metered</string>
   <string name="route_list">Route</string>
   <string name="route_entry_all">All</string>
   <string name="route_entry_bypass_lan">Bypass LAN</string>
@@ -46,7 +48,9 @@
   <string name="proxied_apps">Apps VPN mode</string>
   <string name="proxied_apps_summary">Configure VPN mode for selected apps</string>
   <string name="on">On</string>
-  <string name="bypass_apps">Bypass Mode</string>
+  <string name="off">Off</string>
+  <string name="proxied_apps_mode">Mode</string>
+  <string name="bypass_apps">Bypass</string>
   <string name="bypass_apps_summary">Enable this option to bypass selected apps</string>
   <string name="auto_connect">Auto Connect</string>
   <string name="auto_connect_summary">Enable Shadowsocks on startup</string>
