@@ -26,6 +26,8 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Bundle
 import android.text.format.Formatter
 import android.util.LongSparseArray
@@ -42,6 +44,7 @@ import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.*
+import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.aidl.TrafficStats
 import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.database.Profile
@@ -61,7 +64,13 @@ import com.google.android.gms.ads.VideoOptions
 import com.google.android.gms.ads.formats.NativeAdOptions
 import com.google.android.gms.ads.formats.UnifiedNativeAd
 import com.google.android.gms.ads.formats.UnifiedNativeAdView
-import net.glxn.qrgen.android.QRCode
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.MultiFormatWriter
+import com.google.zxing.WriterException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.nio.charset.StandardCharsets
 
 class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
     companion object {
@@ -74,6 +83,8 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         private const val REQUEST_IMPORT_PROFILES = 1
         private const val REQUEST_REPLACE_PROFILES = 3
         private const val REQUEST_EXPORT_PROFILES = 2
+
+        private val iso88591 = StandardCharsets.ISO_8859_1.newEncoder()
     }
 
     /**
@@ -82,7 +93,32 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
     private val isEnabled get() = (activity as MainActivity).state.let { it.canStop || it == BaseService.State.Stopped }
     private fun isProfileEditable(id: Long) =
             (activity as MainActivity).state == BaseService.State.Stopped || id !in Core.activeProfileIds
-    private var isAdLoaded = false
+
+    private var nativeAd: UnifiedNativeAd? = null
+    private var nativeAdView: UnifiedNativeAdView? = null
+    private var adHost: ProfileViewHolder? = null
+    private fun tryBindAd() = lifecycleScope.launchWhenStarted {
+        val fp = layoutManager.findFirstVisibleItemPosition()
+        if (fp < 0) return@launchWhenStarted
+        for (i in object : Iterator<Int> {
+            var first = fp
+            var last = layoutManager.findLastCompletelyVisibleItemPosition()
+            var flipper = false
+            override fun hasNext() = first <= last
+            override fun next(): Int {
+                flipper = !flipper
+                return if (flipper) first++ else last--
+            }
+        }.asSequence().toList().reversed()) {
+            val viewHolder = profilesList.findViewHolderForAdapterPosition(i) as ProfileViewHolder
+            if (viewHolder.item.isSponsored) {
+                viewHolder.populateUnifiedNativeAdView(nativeAd!!, nativeAdView!!)
+                // might be in the middle of a layout after scrolling, need to wait
+                withContext(Dispatchers.Main) { profilesAdapter.notifyItemChanged(i) }
+                break
+            }
+        }
+    }
 
     @SuppressLint("ValidFragment")
     class QRCodeDialog() : DialogFragment() {
@@ -90,12 +126,30 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
             arguments = bundleOf(Pair(KEY_URL, url))
         }
 
-        override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-            val image = ImageView(context)
-            image.layoutParams = LinearLayout.LayoutParams(-1, -1)
-            val size = resources.getDimensionPixelSize(R.dimen.qr_code_size)
-            image.setImageBitmap((QRCode.from(arguments?.getString(KEY_URL)!!).withSize(size, size) as QRCode).bitmap())
-            return image
+        /**
+         * Based on:
+         * https://android.googlesource.com/platform/packages/apps/Settings/+/0d706f0/src/com/android/settings/wifi/qrcode/QrCodeGenerator.java
+         * https://android.googlesource.com/platform/packages/apps/Settings/+/8a9ccfd/src/com/android/settings/wifi/dpp/WifiDppQrCodeGeneratorFragment.java#153
+         */
+        override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = try {
+            val url = arguments?.getString(KEY_URL)!!
+            val size = resources.getDimensionPixelSize(R.dimen.qrcode_size)
+            val hints = mutableMapOf<EncodeHintType, Any>()
+            if (!iso88591.canEncode(url)) hints[EncodeHintType.CHARACTER_SET] = StandardCharsets.UTF_8.name()
+            val qrBits = MultiFormatWriter().encode(url, BarcodeFormat.QR_CODE, size, size, hints)
+            ImageView(context).apply {
+                layoutParams = ViewGroup.LayoutParams(size, size)
+                setImageBitmap(Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565).apply {
+                    for (x in 0 until size) for (y in 0 until size) {
+                        setPixel(x, y, if (qrBits.get(x, y)) Color.BLACK else Color.WHITE)
+                    }
+                })
+            }
+        } catch (e: WriterException) {
+            Crashlytics.logException(e)
+            (activity as MainActivity).snackbar().setText(e.readableMessage).show()
+            dismiss()
+            null
         }
     }
 
@@ -107,8 +161,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         private val text2 = itemView.findViewById<TextView>(android.R.id.text2)
         private val traffic = itemView.findViewById<TextView>(R.id.traffic)
         private val edit = itemView.findViewById<View>(R.id.edit)
-        private var currentNativeAd: UnifiedNativeAd? = null
-        private var isAttached = false
+        private val adContainer = itemView.findViewById<LinearLayout>(R.id.ad_container)
 
         init {
             edit.setOnClickListener {
@@ -127,12 +180,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
             TooltipCompat.setTooltipText(share, share.contentDescription)
         }
 
-        private fun populateUnifiedNativeAdView(nativeAd: UnifiedNativeAd, adView: UnifiedNativeAdView) {
-            // You must call destroy on old ads when you are done with them,
-            // otherwise you will have a memory leak.
-            currentNativeAd?.destroy()
-            currentNativeAd = nativeAd
-
+        fun populateUnifiedNativeAdView(nativeAd: UnifiedNativeAd, adView: UnifiedNativeAdView) {
             // Set other ad assets.
             adView.headlineView = adView.findViewById(R.id.ad_headline)
             adView.bodyView = adView.findViewById(R.id.ad_body)
@@ -185,54 +233,40 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
             // This method tells the Google Mobile Ads SDK that you have finished populating your
             // native ad view with this native ad.
             adView.setNativeAd(nativeAd)
+            adContainer.addView(adView)
+            adHost = this
         }
 
         fun attach() {
-            isAttached = true
-
-            if (item.host == "198.199.101.152") {
-                val builder = AdLoader.Builder(context, "ca-app-pub-9097031975646651/9333091620")
-                builder.forUnifiedNativeAd { unifiedNativeAd ->
-                    if (!isAdLoaded && isAttached) lifecycleScope.launchWhenStarted {
-                        // OnUnifiedNativeAdLoadedListener implementation.
-                        val adContainer = itemView.findViewById<LinearLayout>(R.id.ad_container)
-                        val adView = layoutInflater.inflate(R.layout.ad_unified, adContainer,
-                                false) as UnifiedNativeAdView
-                        populateUnifiedNativeAdView(unifiedNativeAd, adView)
-
-                        adContainer.removeAllViews()
-                        adContainer.addView(adView)
-
-                        isAdLoaded = true
+            if (adHost != null || !item.isSponsored) return
+            if (nativeAdView == null) {
+                nativeAdView = layoutInflater.inflate(R.layout.ad_unified, adContainer, false) as UnifiedNativeAdView
+                AdLoader.Builder(context, "ca-app-pub-3283768469187309/8632513739").apply {
+                    forUnifiedNativeAd { unifiedNativeAd ->
+                        // You must call destroy on old ads when you are done with them,
+                        // otherwise you will have a memory leak.
+                        nativeAd?.destroy()
+                        nativeAd = unifiedNativeAd
+                        tryBindAd()
                     }
-                }
-
-                val videoOptions = VideoOptions.Builder()
-                        .setStartMuted(true)
-                        .build()
-                val adOptions = NativeAdOptions.Builder()
-                        .setVideoOptions(videoOptions)
-                        .build()
-                builder.withNativeAdOptions(adOptions)
-
-                val adLoader = builder.build()
-                adLoader.loadAd(AdRequest.Builder().apply {
+                    withNativeAdOptions(NativeAdOptions.Builder().apply {
+                        setVideoOptions(VideoOptions.Builder().apply {
+                            setStartMuted(true)
+                        }.build())
+                    }.build())
+                }.build().loadAd(AdRequest.Builder().apply {
                     addTestDevice("B08FC1764A7B250E91EA9D0D5EBEB208")
                     addTestDevice("7509D18EB8AF82F915874FEF53877A64")
                 }.build())
-            } else {
-                itemView.findViewById<LinearLayout>(R.id.ad_container).removeAllViews()
-            }
+            } else if (nativeAd != null) populateUnifiedNativeAdView(nativeAd!!, nativeAdView!!)
         }
 
         fun detach() {
-            isAttached = false
-            if (currentNativeAd != null) {
-                isAdLoaded = false
+            if (adHost == this) {
+                adHost = null
+                adContainer.removeAllViews()
+                tryBindAd()
             }
-            currentNativeAd?.destroy()
-            currentNativeAd = null
-            itemView.findViewById<LinearLayout>(R.id.ad_container).removeAllViews()
         }
 
         fun bind(item: Profile) {
@@ -298,7 +332,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
             setHasStableIds(true)   // see: http://stackoverflow.com/a/32488059/2245107
         }
 
-        override fun onViewAttachedToWindow(holder: ProfileViewHolder)   = holder.attach()
+        override fun onViewAttachedToWindow(holder: ProfileViewHolder) = holder.attach()
         override fun onViewDetachedFromWindow(holder: ProfileViewHolder) = holder.detach()
         override fun onBindViewHolder(holder: ProfileViewHolder, position: Int) = holder.bind(profiles[position])
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ProfileViewHolder = ProfileViewHolder(
@@ -377,6 +411,8 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
     private var selectedItem: ProfileViewHolder? = null
 
     val profilesAdapter by lazy { ProfilesAdapter() }
+    private lateinit var profilesList: RecyclerView
+    private val layoutManager by lazy { LinearLayoutManager(context, RecyclerView.VERTICAL, false) }
     private lateinit var undoManager: UndoSnackbarManager<Profile>
     private val statsCache = LongSparseArray<TrafficStats>()
 
@@ -396,13 +432,9 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         toolbar.setTitle(R.string.profiles)
         toolbar.inflateMenu(R.menu.profile_manager_menu)
         toolbar.setOnMenuItemClickListener(this)
-
-        isAdLoaded = false
-
         ProfileManager.ensureNotEmpty()
-        val profilesList = view.findViewById<RecyclerView>(R.id.list)
+        profilesList = view.findViewById(R.id.list)
         profilesList.setOnApplyWindowInsetsListener(MainListListener)
-        val layoutManager = LinearLayoutManager(context, RecyclerView.VERTICAL, false)
         profilesList.layoutManager = layoutManager
         profilesList.addItemDecoration(DividerItemDecoration(context, layoutManager.orientation))
         layoutManager.scrollToPosition(profilesAdapter.profiles.indexOfFirst { it.id == DataStore.profileId })
@@ -560,6 +592,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
 
     override fun onDestroyView() {
         undoManager.flush()
+        nativeAd?.destroy()
         super.onDestroyView()
     }
 

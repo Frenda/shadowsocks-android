@@ -22,6 +22,7 @@ package com.github.shadowsocks
 
 import android.app.Activity
 import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.os.Build
@@ -30,8 +31,8 @@ import android.os.Parcelable
 import android.view.MenuItem
 import android.view.View
 import androidx.appcompat.app.AlertDialog
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.*
-import com.github.shadowsocks.Core.app
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.plugin.*
@@ -40,6 +41,8 @@ import com.github.shadowsocks.utils.*
 import com.github.shadowsocks.widget.ListListener
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.android.parcel.Parcelize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class ProfileConfigFragment : PreferenceFragmentCompat(),
         Preference.OnPreferenceChangeListener, OnPreferenceDataStoreChangeListener {
@@ -75,6 +78,10 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         preferenceManager.preferenceDataStore = DataStore.privateStore
         val activity = requireActivity()
         profileId = activity.intent.getLongExtra(Action.EXTRA_PROFILE_ID, -1L)
+        if (profileId != -1L && profileId != DataStore.editingId) {
+            activity.finish()
+            return
+        }
         addPreferencesFromResource(R.xml.pref_profile)
         findPreference<EditTextPreference>(Key.remotePort)!!.setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         findPreference<EditTextPreference>(Key.password)!!.summaryProvider = PasswordSummaryProvider
@@ -109,7 +116,6 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         pluginConfigure.setOnBindEditTextListener(EditTextPreferenceModifiers.Monospace)
         pluginConfigure.onPreferenceChangeListener = this
         initPlugins()
-        receiver = Core.listenForPackageChanges(false) { initPlugins() }
         udpFallback = findPreference(Key.udpFallback)!!
         DataStore.privateStore.registerChangeListener(this)
     }
@@ -136,7 +142,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         PluginConfigurationDialogFragment().apply {
             setArg(Key.pluginConfigure, pluginConfiguration.selected)
             setTargetFragment(this@ProfileConfigFragment, 0)
-        }.show(fragmentManager ?: return, Key.pluginConfigure)
+        }.show(parentFragmentManager, Key.pluginConfigure)
     }
 
     private fun saveAndExit() {
@@ -147,6 +153,15 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         ProfilesFragment.instance?.profilesAdapter?.deepRefreshId(profileId)
         if (profileId in Core.activeProfileIds && DataStore.directBootAware) DirectBoot.update()
         requireActivity().finish()
+    }
+
+    override fun onAttach(context: Context) {
+        super.onAttach(context)
+        receiver = context.listenForPackageChanges(false) {
+            lifecycleScope.launch(Dispatchers.Main) {   // wait until changes were flushed
+                lifecycleScope.launchWhenCreated { initPlugins() }
+            }
+        }
     }
 
     override fun onResume() {
@@ -178,7 +193,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
             Key.plugin -> BottomSheetPreferenceDialogFragment().apply {
                 setArg(Key.plugin)
                 setTargetFragment(this@ProfileConfigFragment, 0)
-            }.show(fragmentManager ?: return, Key.plugin)
+            }.show(parentFragmentManager, Key.plugin)
             Key.pluginConfigure -> {
                 val intent = PluginManager.buildIntent(pluginConfiguration.selected, PluginContract.ACTION_CONFIGURE)
                 if (intent.resolveActivity(requireContext().packageManager) == null) showPluginEditor() else {
@@ -221,9 +236,13 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         else -> false
     }
 
+    override fun onDetach() {
+        requireContext().unregisterReceiver(receiver)
+        super.onDetach()
+    }
+
     override fun onDestroy() {
         DataStore.privateStore.unregisterChangeListener(this)
-        app.unregisterReceiver(receiver)
         super.onDestroy()
     }
 }
