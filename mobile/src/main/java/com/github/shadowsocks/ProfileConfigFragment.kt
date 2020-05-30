@@ -88,7 +88,6 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         findPreference<EditTextPreference>(Key.remotePort)!!.setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         findPreference<EditTextPreference>(Key.password)!!.summaryProvider = PasswordSummaryProvider
         val serviceMode = DataStore.serviceMode
-        findPreference<Preference>(Key.remoteDns)!!.isEnabled = serviceMode != Key.modeProxy
         findPreference<Preference>(Key.ipv6)!!.isEnabled = serviceMode == Key.modeVpn
         isProxyApps = findPreference(Key.proxyApps)!!
         isProxyApps.isEnabled = serviceMode == Key.modeVpn
@@ -100,7 +99,6 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         findPreference<Preference>(Key.metered)!!.apply {
             if (Build.VERSION.SDK_INT >= 28) isEnabled = serviceMode == Key.modeVpn else remove()
         }
-        findPreference<Preference>(Key.udpdns)!!.isEnabled = serviceMode != Key.modeProxy
         plugin = findPreference(Key.plugin)!!
         pluginConfigure = findPreference(Key.pluginConfigure)!!
         pluginConfigure.setOnBindEditTextListener(EditTextPreferenceModifiers.Monospace)
@@ -177,7 +175,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         DataStore.dirty = true
         true
     } catch (exc: RuntimeException) {
-        Snackbar.make(view!!, exc.readableMessage, Snackbar.LENGTH_LONG).show()
+        Snackbar.make(requireView(), exc.readableMessage, Snackbar.LENGTH_LONG).show()
         false
     }
 
@@ -217,7 +215,9 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
                 plugin.value = pluginConfiguration.selected
                 pluginConfigure.isEnabled = selected !is NoPlugin
                 pluginConfigure.text = pluginConfiguration.getOptions().toString()
-                if (!selected.trusted) Snackbar.make(view!!, R.string.plugin_untrusted, Snackbar.LENGTH_LONG).show()
+                if (!selected.trusted) {
+                    Snackbar.make(requireView(), R.string.plugin_untrusted, Snackbar.LENGTH_LONG).show()
+                }
             }
             REQUEST_CODE_PLUGIN_CONFIGURE -> when (resultCode) {
                 Activity.RESULT_OK -> {
