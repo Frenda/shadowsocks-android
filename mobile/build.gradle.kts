@@ -10,17 +10,20 @@ plugins {
 setupApp()
 
 android.defaultConfig.applicationId = "com.github.shadowsocks"
-androidExtensions.isExperimental = true
 
 dependencies {
+    val cameraxVersion = "1.0.0-beta07"
+
     implementation("androidx.browser:browser:1.2.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.0.0-beta6")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:1.0.0-alpha14")
+    implementation("androidx.constraintlayout:constraintlayout:2.0.0-beta8")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:$lifecycleVersion")
-    implementation("com.google.android.gms:play-services-vision:20.0.0")
-    implementation("com.google.firebase:firebase-ads:19.1.0")
+    implementation("com.google.firebase:firebase-ads:19.3.0")
+    implementation("com.google.mlkit:barcode-scanning:16.0.1")
     implementation("com.google.zxing:core:3.4.0")
     implementation("com.takisoft.preferencex:preferencex-simplemenu:1.1.0")
     implementation("com.twofortyfouram:android-plugin-api-for-locale:1.0.4")
     implementation("me.zhanghai.android.fastscroll:library:1.1.4")
-    implementation("xyz.belvi.mobilevision:barcodescanner:2.0.3")
 }

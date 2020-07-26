@@ -44,7 +44,7 @@ import java.net.InetAddress
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-fun <T> Iterable<T>.forEachTry(action: (T) -> Unit) {
+inline fun <T> Iterable<T>.forEachTry(action: (T) -> Unit) {
     var result: Exception? = null
     for (element in this) try {
         action(element)
@@ -132,7 +132,5 @@ fun Resources.Theme.resolveResourceId(@AttrRes resId: Int): Int {
     if (!resolveAttribute(resId, typedValue, true)) throw Resources.NotFoundException()
     return typedValue.resourceId
 }
-
-val Intent.datas get() = listOfNotNull(data) + (clipData?.asIterable()?.mapNotNull { it.uri } ?: emptyList())
 
 fun Preference.remove() = parent!!.removePreference(this)
