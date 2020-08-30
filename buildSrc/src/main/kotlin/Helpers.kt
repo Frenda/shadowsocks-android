@@ -11,7 +11,7 @@ import org.gradle.kotlin.dsl.getByName
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmOptions
 import java.util.*
 
-const val lifecycleVersion = "2.3.0-alpha06"
+const val lifecycleVersion = "2.3.0-alpha07"
 
 private val Project.android get() = extensions.getByName<BaseExtension>("android")
 
@@ -24,6 +24,7 @@ val Project.currentFlavor get() = gradle.startParameter.taskRequests.toString().
 
 fun Project.setupCommon() {
     android.apply {
+        buildToolsVersion("30.0.2")
         compileSdkVersion(30)
         defaultConfig {
             minSdkVersion(23)
@@ -34,6 +35,11 @@ fun Project.setupCommon() {
         compileOptions {
             sourceCompatibility = javaVersion
             targetCompatibility = javaVersion
+        }
+        lintOptions {
+            warning("ExtraTranslation")
+            warning("ImpliedQuantity")
+            informational("MissingTranslation")
         }
         (this as ExtensionAware).extensions.getByName<KotlinJvmOptions>("kotlinOptions").jvmTarget =
                 javaVersion.toString()
@@ -50,10 +56,15 @@ fun Project.setupCore() {
     setupCommon()
     android.apply {
         defaultConfig {
-            versionCode = 5010250
-            versionName = "5.1.2-nightly"
+            versionCode = 5010350
+            versionName = "5.1.3-nightly"
         }
         compileOptions.isCoreLibraryDesugaringEnabled = true
+        lintOptions {
+            disable("BadConfigurationProvider")
+            warning("RestrictedApi")
+            disable("UseAppTint")
+        }
         ndkVersion = "21.3.6528147"
     }
     dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:1.0.9")
