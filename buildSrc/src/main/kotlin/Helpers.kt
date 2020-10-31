@@ -11,7 +11,7 @@ import org.gradle.kotlin.dsl.getByName
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmOptions
 import java.util.*
 
-const val lifecycleVersion = "2.3.0-alpha07"
+const val lifecycleVersion = "2.3.0-beta01"
 
 private val Project.android get() = extensions.getByName<BaseExtension>("android")
 
@@ -47,8 +47,8 @@ fun Project.setupCommon() {
 
     dependencies {
         add("testImplementation", "junit:junit:4.13")
-        add("androidTestImplementation", "androidx.test:runner:1.2.0")
-        add("androidTestImplementation", "androidx.test.espresso:espresso-core:3.2.0")
+        add("androidTestImplementation", "androidx.test:runner:1.3.0")
+        add("androidTestImplementation", "androidx.test.espresso:espresso-core:3.3.0")
     }
 }
 
@@ -56,8 +56,8 @@ fun Project.setupCore() {
     setupCommon()
     android.apply {
         defaultConfig {
-            versionCode = 5010350
-            versionName = "5.1.3-nightly"
+            versionCode = 5010450
+            versionName = "5.1.4-nightly"
         }
         compileOptions.isCoreLibraryDesugaringEnabled = true
         lintOptions {
