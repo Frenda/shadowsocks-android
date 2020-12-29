@@ -21,8 +21,6 @@
 package com.github.shadowsocks.bg
 
 import android.content.Context
-import android.util.Base64
-import com.github.shadowsocks.Core
 import com.github.shadowsocks.acl.Acl
 import com.github.shadowsocks.acl.AclSyncer
 import com.github.shadowsocks.database.Profile
@@ -30,17 +28,13 @@ import com.github.shadowsocks.plugin.PluginConfiguration
 import com.github.shadowsocks.plugin.PluginManager
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.parseNumericAddress
-import com.github.shadowsocks.utils.signaturesCompat
-import com.github.shadowsocks.utils.useCancellable
-import com.google.firebase.remoteconfig.ktx.get
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import java.io.File
 import java.io.IOException
-import java.net.*
-import java.security.MessageDigest
-import org.json.JSONArray
+import java.net.URI
+import java.net.URISyntaxException
+import java.net.UnknownHostException
 
 /**
  * This class sets up environment for ss-local.
@@ -49,40 +43,8 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
     private var configFile: File? = null
     var trafficMonitor: TrafficMonitor? = null
     val plugin by lazy { PluginManager.init(PluginConfiguration(profile.plugin ?: "")) }
-    private var scheduleConfigUpdate = false
 
     suspend fun init(service: BaseService.Interface) {
-        if (profile.isSponsored) {
-            scheduleConfigUpdate = true
-            val mdg = MessageDigest.getInstance("SHA-1")
-            mdg.update(Core.packageInfo.signaturesCompat.first().toByteArray())
-            val (config, success) = RemoteConfig.fetch()
-            scheduleConfigUpdate = !success
-            val conn = withContext(Dispatchers.IO) {
-                // Network.openConnection might use networking, see https://issuetracker.google.com/issues/135242093
-                service.openConnection(URL(config["proxy_url"].asString())) as HttpURLConnection
-            }
-            conn.requestMethod = "POST"
-            conn.doOutput = true
-
-            val proxies = conn.useCancellable {
-                try {
-                    outputStream.bufferedWriter().use {
-                        it.write("sig=" + Base64.encodeToString(mdg.digest(), Base64.DEFAULT))
-                    }
-                    inputStream.bufferedReader().readText()
-                } catch (e: IOException) {
-                    throw BaseService.ExpectedExceptionWrapper(e)
-                }
-            }.split('|').toMutableList()
-            proxies.shuffle()
-            val proxy = proxies.first().split(':')
-            profile.host = proxy[0].trim()
-            profile.remotePort = proxy[1].trim().toInt()
-            profile.password = proxy[2].trim()
-            profile.method = proxy[3].trim()
-        }
-
         // it's hard to resolve DNS on a specific interface so we'll do it here
         if (profile.host.parseNumericAddress() == null) {
             profile.host = try {
@@ -111,12 +73,15 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
         }
         config.put("local_address", DataStore.listenAddress)
         config.put("local_port", DataStore.portProxy)
+        config.put("udp_max_associations", 256);
         configFile.writeText(config.toString())
 
         val cmd = arrayListOf(
                 File((service as Context).applicationInfo.nativeLibraryDir, Executable.SS_LOCAL).absolutePath,
                 "--stat-path", stat.absolutePath,
-                "-c", configFile.absolutePath)
+                "-c", configFile.absolutePath,
+                "--udp-bind-addr", "${DataStore.listenAddress}:${DataStore.portProxy}",
+        )
         if (service.isVpnService) cmd += arrayListOf("--vpn")
         if (extraFlag != null) cmd.add(extraFlag)
         if (dnsRelay) try {
@@ -125,8 +90,9 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
             throw BaseService.ExpectedExceptionWrapper(e)
         }.let { dns ->
             cmd += arrayListOf(
-                    "--dns-relay", "${DataStore.listenAddress}:${DataStore.portLocalDns}",
-                    "--remote-dns", "${dns.host ?: "0.0.0.0"}:${if (dns.port < 0) 53 else dns.port}")
+                    "--dns-addr", "${DataStore.listenAddress}:${DataStore.portLocalDns}",
+                    "--local-dns-addr", "local_dns_path",
+                    "--remote-dns-addr", "${dns.host ?: "0.0.0.0"}:${if (dns.port < 0) 53 else dns.port}")
         }
 
         if (route != Acl.ALL) {
@@ -139,7 +105,6 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
 
     fun scheduleUpdate() {
         if (route !in arrayOf(Acl.ALL, Acl.CUSTOM_RULES)) AclSyncer.schedule(route)
-        if (scheduleConfigUpdate) RemoteConfig.fetchAsync()
     }
 
     fun shutdown(scope: CoroutineScope) {

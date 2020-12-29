@@ -24,7 +24,7 @@ val Project.currentFlavor get() = gradle.startParameter.taskRequests.toString().
 
 fun Project.setupCommon() {
     android.apply {
-        buildToolsVersion("30.0.2")
+        buildToolsVersion("30.0.3")
         compileSdkVersion(30)
         defaultConfig {
             minSdkVersion(23)
@@ -46,7 +46,7 @@ fun Project.setupCommon() {
     }
 
     dependencies {
-        add("testImplementation", "junit:junit:4.13")
+        add("testImplementation", "junit:junit:4.13.1")
         add("androidTestImplementation", "androidx.test:runner:1.3.0")
         add("androidTestImplementation", "androidx.test.espresso:espresso-core:3.3.0")
     }
@@ -56,8 +56,8 @@ fun Project.setupCore() {
     setupCommon()
     android.apply {
         defaultConfig {
-            versionCode = 5010450
-            versionName = "5.1.4-nightly"
+            versionCode = 5010950
+            versionName = "5.1.9-nightly"
         }
         compileOptions.isCoreLibraryDesugaringEnabled = true
         lintOptions {
