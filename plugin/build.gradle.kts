@@ -2,7 +2,7 @@ plugins {
     id("com.android.library")
     id("com.vanniktech.maven.publish")
     kotlin("android")
-    kotlin("android.extensions")
+    id("kotlin-parcelize")
 }
 
 setupCommon()
@@ -26,5 +26,6 @@ dependencies {
     api("androidx.core:core-ktx:1.3.2")
     // https://android-developers.googleblog.com/2019/07/android-q-beta-5-update.html
     api("androidx.drawerlayout:drawerlayout:1.1.1")
-    api("com.google.android.material:material:1.2.1")
+    api("androidx.fragment:fragment-ktx:1.3.2")
+    api("com.google.android.material:material:1.3.0")
 }

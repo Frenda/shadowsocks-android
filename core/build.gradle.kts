@@ -4,8 +4,8 @@ plugins {
     id("com.android.library")
     id("org.mozilla.rust-android-gradle.rust-android")
     kotlin("android")
-    kotlin("android.extensions")
     kotlin("kapt")
+    id("kotlin-parcelize")
 }
 
 setupCore()
@@ -19,9 +19,10 @@ android {
             arguments("-j${Runtime.getRuntime().availableProcessors()}")
         }
 
-        javaCompileOptions.annotationProcessorOptions.arguments(mapOf(
-                "room.incremental" to "true",
-                "room.schemaLocation" to "$projectDir/schemas"))
+        kapt.arguments {
+            arg("room.incremental", true)
+            arg("room.schemaLocation", "$projectDir/schemas")
+        }
     }
 
     externalNativeBuild.ndkBuild.path("src/main/jni/Android.mk")
@@ -38,7 +39,9 @@ cargo {
     profile = findProperty("CARGO_PROFILE")?.toString() ?: currentFlavor
     extraCargoBuildArguments = listOf("--bin", libname!!)
     featureSpec.noDefaultBut(arrayOf(
-            "single-threaded",
+            "stream-cipher",
+            "aead-cipher-extra",
+            "logging",
             "local-flow-stat",
             "local-dns"))
     exec = { spec, toolchain ->
@@ -62,24 +65,22 @@ tasks.clean.dependsOn("cargoClean")
 
 dependencies {
     val coroutinesVersion = "1.4.2"
-    val roomVersion = "2.2.5"
-    val workVersion = "2.4.0"
+    val roomVersion = "2.3.0-rc01"
+    val workVersion = "2.5.0"
 
     api(project(":plugin"))
-    api("androidx.appcompat:appcompat:1.2.0")
-    api("androidx.core:core-ktx:1.5.0-alpha05")
+    api("androidx.core:core-ktx:1.5.0-rc01")
 
-    api("androidx.fragment:fragment-ktx:1.3.0-beta02")
     api("androidx.lifecycle:lifecycle-common-java8:$lifecycleVersion")
     api("androidx.lifecycle:lifecycle-livedata-core-ktx:$lifecycleVersion")
     api("androidx.preference:preference:1.1.1")
     api("androidx.room:room-runtime:$roomVersion")
+    api("androidx.work:work-multiprocess:$workVersion")
     api("androidx.work:work-runtime-ktx:$workVersion")
-    api("androidx.work:work-gcm:$workVersion")
     api("com.google.android.gms:play-services-oss-licenses:17.0.0")
     api("com.google.code.gson:gson:2.8.6")
-    api("com.google.firebase:firebase-analytics-ktx:18.0.0")
-    api("com.google.firebase:firebase-crashlytics:17.3.0")
+    api("com.google.firebase:firebase-analytics-ktx:18.0.3")
+    api("com.google.firebase:firebase-crashlytics:17.4.1")
     api("com.jakewharton.timber:timber:4.7.1")
     api("dnsjava:dnsjava:3.3.1")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:$coroutinesVersion")

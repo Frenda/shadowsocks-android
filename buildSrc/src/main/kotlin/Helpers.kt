@@ -11,7 +11,7 @@ import org.gradle.kotlin.dsl.getByName
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmOptions
 import java.util.*
 
-const val lifecycleVersion = "2.3.0-beta01"
+const val lifecycleVersion = "2.3.0-rc01"
 
 private val Project.android get() = extensions.getByName<BaseExtension>("android")
 
@@ -46,7 +46,7 @@ fun Project.setupCommon() {
     }
 
     dependencies {
-        add("testImplementation", "junit:junit:4.13.1")
+        add("testImplementation", "junit:junit:4.13.2")
         add("androidTestImplementation", "androidx.test:runner:1.3.0")
         add("androidTestImplementation", "androidx.test.espresso:espresso-core:3.3.0")
     }
@@ -56,8 +56,8 @@ fun Project.setupCore() {
     setupCommon()
     android.apply {
         defaultConfig {
-            versionCode = 5010950
-            versionName = "5.1.9-nightly"
+            versionCode = 5020250
+            versionName = "5.2.2-nightly"
         }
         compileOptions.isCoreLibraryDesugaringEnabled = true
         lintOptions {
@@ -67,7 +67,7 @@ fun Project.setupCore() {
         }
         ndkVersion = "21.3.6528147"
     }
-    dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:1.0.9")
+    dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:1.1.1")
 }
 
 private val abiCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86" to 3, "x86_64" to 4)
