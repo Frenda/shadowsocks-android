@@ -11,7 +11,7 @@ import org.gradle.kotlin.dsl.getByName
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmOptions
 import java.util.*
 
-const val lifecycleVersion = "2.3.0-rc01"
+const val lifecycleVersion = "2.3.1"
 
 private val Project.android get() = extensions.getByName<BaseExtension>("android")
 
@@ -56,8 +56,8 @@ fun Project.setupCore() {
     setupCommon()
     android.apply {
         defaultConfig {
-            versionCode = 5020250
-            versionName = "5.2.2-nightly"
+            versionCode = 5020450
+            versionName = "5.2.4-nightly"
         }
         compileOptions.isCoreLibraryDesugaringEnabled = true
         lintOptions {
@@ -89,6 +89,7 @@ fun Project.setupApp() {
         lintOptions.disable("RemoveWorkManagerInitializer")
         packagingOptions {
             exclude("**/*.kotlin_*")
+            jniLibs.useLegacyPackaging = true
         }
         splits.abi {
             isEnable = true

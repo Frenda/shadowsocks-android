@@ -21,56 +21,43 @@
 package com.github.shadowsocks.bg
 
 import android.content.Context
+import com.github.shadowsocks.Core.app
 import com.github.shadowsocks.acl.Acl
 import com.github.shadowsocks.acl.AclSyncer
+import com.github.shadowsocks.core.R
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.plugin.PluginConfiguration
 import com.github.shadowsocks.plugin.PluginManager
 import com.github.shadowsocks.preference.DataStore
-import com.github.shadowsocks.utils.parseNumericAddress
 import kotlinx.coroutines.CoroutineScope
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.IOException
 import java.net.URI
 import java.net.URISyntaxException
-import java.net.UnknownHostException
 
 /**
  * This class sets up environment for ss-local.
  */
 class ProxyInstance(val profile: Profile, private val route: String = profile.route) {
+    init {
+        require(profile.host.isNotEmpty() && (profile.method == "none" || profile.password.isNotEmpty())) {
+            app.getString(R.string.proxy_empty)
+        }
+        // check the crypto
+        require(profile.method !in arrayOf("aes-192-gcm", "chacha20", "salsa20")) {
+            "cipher ${profile.method} is deprecated."
+        }
+    }
     private var configFile: File? = null
     var trafficMonitor: TrafficMonitor? = null
     val plugin by lazy { PluginManager.init(PluginConfiguration(profile.plugin ?: "")) }
-
-    suspend fun init(service: BaseService.Interface) {
-        // it's hard to resolve DNS on a specific interface so we'll do it here
-        if (profile.host.parseNumericAddress() == null && profile.plugin != null) {
-            profile.host = try {
-                service.resolver(profile.host).firstOrNull()
-            } catch (e: IOException) {
-                throw UnknownHostException().initCause(e)
-            }?.hostAddress ?: throw UnknownHostException()
-        }
-        // check the crypto
-        val deprecatedCiphers
-            = arrayOf("aes-192-gcm", "chacha20", "salsa20")
-        for (c in deprecatedCiphers)
-        {
-            if (profile.method == c) {
-                throw IllegalArgumentException("cipher $c is deprecated.")
-            }
-        }
-    }
 
     /**
      * Sensitive shadowsocks configuration file requires extra protection. It may be stored in encrypted storage or
      * device storage, depending on which is currently available.
      */
-    fun start(service: BaseService.Interface, stat: File, configFile: File, mode: String,
-              dnsRelay: Boolean = true) {
+    fun start(service: BaseService.Interface, stat: File, configFile: File, mode: String, dnsRelay: Boolean = true) {
         // setup traffic monitor path
         trafficMonitor = TrafficMonitor(stat)
 
@@ -84,37 +71,32 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
             config.put("plugin", path).put("plugin_opts", opts.toString())
         }
         config.put("dns", "unix://local_dns_path")
+        config.put("locals", JSONArray().apply {
+            // local SOCKS5 proxy
+            put(JSONObject().apply {
+                put("local_address", DataStore.listenAddress)
+                put("local_port", DataStore.portProxy)
+                put("local_udp_address", DataStore.listenAddress)
+                put("local_udp_port", DataStore.portProxy)
+                put("mode", mode)
+            })
 
-        // init local config array
-        val localConfigs = JSONArray()
-
-        // local SOCKS5 proxy
-        val proxyConfig = JSONObject()
-        proxyConfig.put("local_address", DataStore.listenAddress)
-        proxyConfig.put("local_port", DataStore.portProxy)
-        proxyConfig.put("local_udp_address", DataStore.listenAddress)
-        proxyConfig.put("local_udp_port", DataStore.portProxy)
-        proxyConfig.put("mode", mode)
-        localConfigs.put(proxyConfig)
-
-        // local DNS proxy
-        if (dnsRelay) try {
-            URI("dns://${profile.remoteDns}")
-        } catch (e: URISyntaxException) {
-            throw BaseService.ExpectedExceptionWrapper(e)
-        }.let { dns ->
-            val dnsConfig = JSONObject()
-            dnsConfig.put("local_address", DataStore.listenAddress)
-            dnsConfig.put("local_port", DataStore.portLocalDns)
-            dnsConfig.put("local_dns_address", "local_dns_path")
-            dnsConfig.put("remote_dns_address", dns.host ?: "0.0.0.0")
-            dnsConfig.put("remote_dns_port", if (dns.port < 0) 53 else dns.port)
-            dnsConfig.put("protocol", "dns")
-            localConfigs.put(dnsConfig)
-        }
-
-        // add all the locals
-        config.put("locals", localConfigs)
+            // local DNS proxy
+            if (dnsRelay) try {
+                URI("dns://${profile.remoteDns}")
+            } catch (e: URISyntaxException) {
+                throw BaseService.ExpectedExceptionWrapper(e)
+            }.let { dns ->
+                put(JSONObject().apply {
+                    put("local_address", DataStore.listenAddress)
+                    put("local_port", DataStore.portLocalDns)
+                    put("local_dns_address", "local_dns_path")
+                    put("remote_dns_address", dns.host ?: "0.0.0.0")
+                    put("remote_dns_port", if (dns.port < 0) 53 else dns.port)
+                    put("protocol", "dns")
+                })
+            }
+        })
         configFile.writeText(config.toString())
 
         // build the command line
@@ -124,7 +106,7 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
                 "-c", configFile.absolutePath,
         )
 
-        if (service.isVpnService) cmd += arrayListOf("--vpn")
+        if (service.isVpnService) cmd += "--vpn"
 
         if (route != Acl.ALL) {
             cmd += "--acl"

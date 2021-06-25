@@ -20,7 +20,6 @@
 
 package com.github.shadowsocks
 
-import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
@@ -49,7 +48,7 @@ import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.plugin.PluginConfiguration
-import com.github.shadowsocks.plugin.showAllowingStateLoss
+import com.github.shadowsocks.plugin.fragment.showAllowingStateLoss
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.Action
 import com.github.shadowsocks.utils.OpenJson
@@ -85,7 +84,6 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, Sea
     private fun isProfileEditable(id: Long) =
             (activity as MainActivity).state == BaseService.State.Stopped || id !in Core.activeProfileIds
 
-    @SuppressLint("ValidFragment")
     class QRCodeDialog() : DialogFragment() {
         constructor(url: String) : this() {
             arguments = bundleOf(Pair(KEY_URL, url))
@@ -241,11 +239,11 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, Sea
         fun filter(name: String) {
             val active = ProfileManager.getActiveProfiles()?.toMutableList() ?: mutableListOf()
             profiles.clear()
-            active.forEach {
-                if (it.name?.contains(name, true) ?: false || it.host.contains(name, true)) {
-                    profiles.add(it)
-                }
-            }
+            val locale = resources.configuration.locale
+            val lower = name.lowercase(locale)
+            profiles.addAll(active.filter {
+                it.name?.lowercase(locale)?.contains(lower) == true || it.host.lowercase(locale).contains(lower)
+            })
             notifyDataSetChanged()
         }
 
@@ -352,7 +350,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, Sea
         toolbar.setOnMenuItemClickListener(this)
         val searchView = toolbar.findViewById<SearchView>(R.id.action_search)
         searchView.setOnQueryTextListener(this)
-        searchView.setQueryHint(getString(android.R.string.search_go))
+        searchView.queryHint = getString(android.R.string.search_go)
 
         ProfileManager.ensureNotEmpty()
         profilesList = view.findViewById(R.id.list)
